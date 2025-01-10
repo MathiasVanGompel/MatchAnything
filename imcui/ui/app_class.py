@@ -21,7 +21,7 @@ from .utils import (
 import os
 if not (Path(__file__).parent / "../third_party/MatchAnything").exists():
     print("**********************************")
-    os.system(f"cd {str(Path(__file__).parent / '../third_party')} && git clone https://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@github.com/hxy-123/MatchAnything_HF.git && mv MatchAnything_HF MatchAnything && cd MatchAnything && gdown 1qnxd5DKomsYUH9_8dQ4Xvwatg_vI-vsh && unzip weights.zip")
+    os.system(f"cd {str(Path(__file__).parent / '../third_party')} && git clone https://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@github.com/hxy-123/MatchAnything_HF.git && mv MatchAnything_HF MatchAnything && cd MatchAnything && gdown 1qnxd5DKomsYUH9_8dQ4Xvwatg_vI-vsh && unzip weights.zip")
 
 DESCRIPTION = '''
 <center><b><font size='10'><font color='78aa58'>Match</font><font color='6589bf'>Anything</font></font></b></center>
