@@ -234,7 +234,7 @@ def gen_examples():
         [str(images_dir / "MTV_thermal_vis_pair2_1.jpg"), str(images_dir / "MTV_thermal_vis_pair2_2.jpg")],
     ]
 
-    pairs_special = [[str(images_dir / "mri_ut_1.jpg"), str(images_dir / "mri_ut_2.jpg")], [str(images_dir / "01.png"), str(images_dir / "02.png")], [str(images_dir / 'thermal_1.png'), str(images_dir / 'rgb_2.png')]]
+    pairs_special = [[str(images_dir / "mri_ut_1.jpg"), str(images_dir / "mri_ut_2.jpg")], [str(images_dir / "01.png"), str(images_dir / "02.png")], [str(images_dir / 'thermal_1.jpg'), str(images_dir / 'rgb_2.png')]]
 
     match_setting_threshold = DEFAULT_SETTING_THRESHOLD
     match_setting_max_features = DEFAULT_SETTING_MAX_FEATURES
