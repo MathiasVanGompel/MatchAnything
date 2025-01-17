@@ -234,7 +234,7 @@ def gen_examples():
         [str(images_dir / "MTV_thermal_vis_pair2_1.jpg"), str(images_dir / "MTV_thermal_vis_pair2_2.jpg")],
     ]
 
-    pairs_special = [[str(images_dir / "mri_ut_1.jpg"), str(images_dir / "mri_ut_2.jpg")], [str(images_dir / "01.png"), str(images_dir / "02.png")], [str(images_dir / 'thermal_1.jpg'), str(images_dir / 'rgb_2.png')]]
+    pairs_special = [[str(images_dir / "mri_ut_1.jpg"), str(images_dir / "mri_ut_2.jpg")], [str(images_dir / "01.png"), str(images_dir / "02.png")], [str(images_dir / 'thermal_1.png'), str(images_dir / 'rgb_2.png')], [str(images_dir / 'robot_render_1.png'), str(images_dir / 'robot_real_world_2.png')]]
 
     match_setting_threshold = DEFAULT_SETTING_THRESHOLD
     match_setting_max_features = DEFAULT_SETTING_MAX_FEATURES
@@ -247,7 +247,7 @@ def gen_examples():
     dist_examples = distribute_elements(pairs_homo, example_matchers)
     for pair, mt in zip(pairs_homo, dist_examples):
         if 'roma' in mt:
-            match_setting_threshold = 0.1
+            match_setting_threshold = 0.01
         else:
             match_setting_threshold = 0.01
 
@@ -302,7 +302,7 @@ def gen_examples():
     input_lists.insert(6, [
                 pairs_special[1][0],
                 pairs_special[1][1],
-                0.1,
+                0.01,
                 match_setting_max_features,
                 detect_keypoints_threshold,
                 "matchanything_roma",
@@ -316,7 +316,7 @@ def gen_examples():
     input_lists.insert(0, [
                 pairs_special[2][0],
                 pairs_special[2][1],
-                0.1,
+                0.01,
                 match_setting_max_features,
                 detect_keypoints_threshold,
                 "matchanything_roma",
@@ -325,6 +325,19 @@ def gen_examples():
                 ransac_confidence,
                 ransac_max_iter,
                 "Fundamental",
+    ])
+    input_lists.insert(1, [
+                pairs_special[3][0],
+                pairs_special[3][1],
+                0.01,
+                match_setting_max_features,
+                detect_keypoints_threshold,
+                "matchanything_roma",
+                ransac_method,
+                4,
+                ransac_confidence,
+                ransac_max_iter,
+                "Homography",
     ])
     return input_lists
 
