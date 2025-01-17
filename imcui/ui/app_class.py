@@ -19,7 +19,7 @@ from .utils import (
     send_to_match,
 )
 import os
-GITHUB_TOKEN = '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'
+GITHUB_TOKEN = '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'
 GOOGLE_TOKEN = '1qnxd5DKomsYUH9_8dQ4Xvwatg_vI-vsh'
 if not (Path(__file__).parent / "../third_party/MatchAnything").exists():
     print("**********************************")
