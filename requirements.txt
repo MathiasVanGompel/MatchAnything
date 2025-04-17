@@ -2,7 +2,8 @@ easydict
 einops
 fastapi
 gdown
-gradio<=5.4.0
+# gradio<=5.4.0
+gradio
 h5py
 huggingface_hub
 imageio
