@@ -2,8 +2,8 @@ easydict
 einops
 fastapi
 gdown
-# gradio<=5.4.0
-gradio
+gradio<=5.4.0
+# gradio
 h5py
 huggingface_hub
 imageio
@@ -39,3 +39,4 @@ uvicorn
 yacs
 safetensors
 pynvml
+pydantic==2.10.6
