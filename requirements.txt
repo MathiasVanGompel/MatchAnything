@@ -31,7 +31,7 @@ seaborn
 shapely
 tensorboardX==2.6.1
 torch==2.2.2
-torchvision==0.15.1
+torchvision==0.17.2
 torchmetrics==0.6.0
 tqdm
 uvicorn
