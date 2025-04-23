@@ -5,6 +5,7 @@ import gradio as gr
 import numpy as np
 from easydict import EasyDict as edict
 from omegaconf import OmegaConf
+import os
 
 # from .sfm import SfmEngine
 from .utils import (
@@ -19,8 +20,10 @@ from .utils import (
     send_to_match,
 )
 import os
-GITHUB_TOKEN = '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'
-GOOGLE_TOKEN = '1qnxd5DKomsYUH9_8dQ4Xvwatg_vI-vsh'
+# GITHUB_TOKEN = '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'
+# GOOGLE_TOKEN = '1qnxd5DKomsYUH9_8dQ4Xvwatg_vI-vsh'
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+GOOGLE_TOKEN = os.environ.get('GOOGLE_TOKEN')
 if not (Path(__file__).parent / "../third_party/MatchAnything").exists():
     print("**********************************")
     os.system(f"cd {str(Path(__file__).parent / '../third_party')} && git clone https://{GITHUB_TOKEN}@github.com/hxy-123/MatchAnything_HF.git && mv MatchAnything_HF MatchAnything && cd MatchAnything && gdown {GOOGLE_TOKEN} && unzip weights.zip")
