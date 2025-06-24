@@ -20,8 +20,6 @@ from .utils import (
     send_to_match,
 )
 import os
-# GITHUB_TOKEN = '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'
-# GOOGLE_TOKEN = '1qnxd5DKomsYUH9_8dQ4Xvwatg_vI-vsh'
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 GOOGLE_TOKEN = os.environ.get('GOOGLE_TOKEN')
 if not (Path(__file__).parent / "../third_party/MatchAnything").exists():
@@ -45,8 +43,8 @@ DESCRIPTION = '''
 [Sida Peng](https://pengsida.net),
 [Dongli Tan](https://github.com/Cuistiano),
 [Zehong Shen](https://zehongs.github.io),
-[Hujun Bao](http://www.cad.zju.edu.cn/home/bao/)<sup>†</sup>,
-[Xiaowei Zhou](https://xzhou.me/)<sup>†</sup>  
+[Xiaowei Zhou](https://xzhou.me/),
+[Hujun Bao](http://www.cad.zju.edu.cn/home/bao/)<sup>†</sup>
 > Arxiv 2025
 
 *This space is derived from [Image Matching WebUI](https://github.com/Vincentqyw/image-matching-webui). We are grateful to the authors for their contribution of the source code.  
