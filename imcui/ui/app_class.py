@@ -45,9 +45,9 @@ DESCRIPTION = '''
 [Zehong Shen](https://zehongs.github.io),
 [Xiaowei Zhou](https://xzhou.me/),
 [Hujun Bao](http://www.cad.zju.edu.cn/home/bao/)<sup>†</sup>
+
 > Arxiv 2025
 
-*This space is derived from [Image Matching WebUI](https://github.com/Vincentqyw/image-matching-webui). We are grateful to the authors for their contribution of the source code.  
 *This space is currently operating in ZeroGPU mode, where the allocation of GPU resources requires additional time. As a result, the execution speed is significantly slower compared to a local machine.
 '''
 
