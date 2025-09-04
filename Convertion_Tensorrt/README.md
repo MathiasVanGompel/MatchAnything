@@ -2,16 +2,35 @@
 
 This directory contains tools to convert the MatchAnything model from PyTorch to TensorRT for optimized inference on NVIDIA GPUs.
 
+## 🎯 **Accurate Implementation Available**
+
+We provide **two implementations**:
+
+1. **Accurate Version** (⭐ **Recommended**): Maintains exact compatibility with the [original HuggingFace space](https://huggingface.co/spaces/LittleFrog/MatchAnything)
+2. **Simplified Version**: Faster but may have slight accuracy differences
+
+The **accurate version** replicates the exact preprocessing and postprocessing pipeline to ensure identical results.
+
 ## Files Overview
 
-- `matchanything_to_trt_full.py` - Main conversion script (PyTorch → ONNX)
-- `run_ma_trt.py` - TensorRT inference script
+### 🎯 **Accurate Implementation** (Recommended)
+- `accurate_matchanything_trt.py` - **Exact replica** of original MatchAnything
+- `convert_accurate_matchanything.py` - Conversion script for accurate version
+- `run_accurate_matchanything_trt.py` - TensorRT inference with exact accuracy
+- `build_accurate_tensorrt.sh` - Automated build for accurate version
+- `validate_accuracy.py` - Script to validate TensorRT vs PyTorch accuracy
+
+### 📁 **Simplified Implementation** (Legacy)
+- `matchanything_to_trt_full.py` - Simplified conversion script
+- `run_ma_trt.py` - Basic TensorRT inference script
+- `roma_models_trt_full.py` - Simplified model definition
+- `build_tensorrt.sh` - Basic build script
+
+### 🔧 **Shared Components**
 - `weight_adapter.py` - Checkpoint weight remapping utilities
 - `encoders_trt_full.py` - TensorRT-optimized encoder implementation
 - `gp_trt.py` - Gaussian Process matcher for TensorRT
-- `matcher_trt_full.py` - Additional matching components (currently unused)
-- `roma_models_trt_full.py` - Main TensorRT model definition
-- `build_tensorrt.sh` - Automated build script
+- `setup_environment.py` - Environment verification
 - `out/` - Output directory for ONNX and TensorRT files
 
 ## Prerequisites
@@ -45,7 +64,20 @@ This will check for CUDA, TensorRT, Python dependencies, and ROMA installation.
 
 **Note**: It's normal for checks to "fail" in development environments without GPU support. The key requirement is that ROMA is found and accessible.
 
-### Option 1: Automated Build (Recommended)
+### Option 1: Accurate Version (⭐ **Recommended**)
+```bash
+# Build accurate TensorRT engine that matches original exactly
+./build_accurate_tensorrt.sh --ckpt /path/to/matchanything_roma.ckpt
+
+# Custom settings
+./build_accurate_tensorrt.sh \
+    --model matchanything_roma \
+    --height 832 --width 832 \
+    --match_threshold 0.1 \
+    --workspace 4096
+```
+
+### Option 2: Simplified Version (Legacy)
 ```bash
 # Basic conversion (no checkpoint)
 ./build_tensorrt.sh
@@ -57,13 +89,13 @@ This will check for CUDA, TensorRT, Python dependencies, and ROMA installation.
 ./build_tensorrt.sh --height 672 --width 672 --workspace 4096
 ```
 
-### Option 2: Example Workflow
+### Option 3: Example Workflow
 For a complete walkthrough:
 ```bash
 python3 example_usage.py --checkpoint /path/to/checkpoint.ckpt --image1 img1.jpg --image2 img2.jpg
 ```
 
-### Option 3: Manual Steps
+### Option 4: Manual Steps
 
 #### Step 1: Export to ONNX
 ```bash
@@ -87,8 +119,16 @@ trtexec \
 
 ## Running Inference
 
-Once you have built the TensorRT engine, run inference:
+### 🎯 **Accurate Version** (Recommended)
+```bash
+python3 run_accurate_matchanything_trt.py \
+    --engine out/accurate_matchanything_roma.plan \
+    --image0 /path/to/image1.jpg \
+    --image1 /path/to/image2.jpg \
+    --confidence_threshold 0.1
+```
 
+### 📁 **Simplified Version**
 ```bash
 python3 run_ma_trt.py \
     --engine out/roma_dino_gp.plan \
@@ -96,6 +136,20 @@ python3 run_ma_trt.py \
     --image1 /path/to/image2.jpg \
     --H 448 --W 448
 ```
+
+## 🔍 **Accuracy Validation**
+
+Validate that your TensorRT implementation produces identical results:
+
+```bash
+python3 validate_accuracy.py \
+    --model matchanything_roma \
+    --image0 test_img1.jpg \
+    --image1 test_img2.jpg \
+    --ckpt /path/to/checkpoint.ckpt
+```
+
+This script compares the TensorRT implementation against the original PyTorch model and reports accuracy metrics.
 
 ### Inference Options
 - `--norm imagenet` - Use ImageNet normalization (recommended for most cases)
