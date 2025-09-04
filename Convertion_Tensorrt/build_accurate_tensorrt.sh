@@ -8,8 +8,8 @@ set -e
 # Configuration
 CKPT_PATH=""
 MODEL="matchanything_roma"
-H=840
-W=840
+H=832
+W=832
 MATCH_THRESHOLD=0.1
 WORKSPACE_MB=4096
 USE_FP16=true

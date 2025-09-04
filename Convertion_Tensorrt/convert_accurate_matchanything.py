@@ -60,8 +60,8 @@ def main():
         default="matchanything_roma",
         help="Model variant to convert"
     )
-    parser.add_argument("--H", type=int, default=840, help="Input height")
-    parser.add_argument("--W", type=int, default=840, help="Input width")
+    parser.add_argument("--H", type=int, default=832, help="Input height")
+    parser.add_argument("--W", type=int, default=832, help="Input width")
     parser.add_argument(
         "--match_threshold", 
         type=float, 

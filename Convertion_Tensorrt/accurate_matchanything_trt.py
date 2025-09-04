@@ -174,12 +174,12 @@ class AccurateMatchAnythingTRT(nn.Module):
         img0_gray = 0.299 * image0[:, 0:1] + 0.587 * image0[:, 1:2] + 0.114 * image0[:, 2:3]
         img1_gray = 0.299 * image1[:, 0:1] + 0.587 * image1[:, 1:2] + 0.114 * image1[:, 2:3]
         
-        # Get features at coarse level (1/14 resolution for DINOv2)
+        # Get features at coarse level (1/16 resolution for DINOv2)
         feat0_dict = self.encoder(img0_gray)
         feat1_dict = self.encoder(img1_gray)
         
-        feat0_c = feat0_dict['coarse']  # [B, C, H/14, W/14]
-        feat1_c = feat1_dict['coarse']  # [B, C, H/14, W/14]
+        feat0_c = feat0_dict['coarse']  # [B, C, H/16, W/16]
+        feat1_c = feat1_dict['coarse']  # [B, C, H/16, W/16]
         
         # Coarse matching using our GP matcher
         warp_c, cert_c = self.matcher(feat0_c, feat1_c)  # [B,Ha,Wa,2], [B,Ha,Wa]
@@ -212,8 +212,8 @@ class AccurateMatchAnythingTRT(nn.Module):
         mconf = cert_c[batch_idx, y_coords, x_coords]  # [N]
         
         # Convert from coarse coordinates to original image coordinates
-        # Coarse features are at 1/14 resolution due to DINOv2 downsampling
-        scale_factor = 14.0
+        # Coarse features are at 1/16 resolution due to DINOv2 downsampling
+        scale_factor = 16.0
         
         # Scale to full resolution
         mkpts0_f = mkpts0_c * scale_factor
