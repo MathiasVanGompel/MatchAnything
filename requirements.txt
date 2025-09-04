@@ -40,3 +40,8 @@ yacs
 safetensors
 pynvml
 pydantic==2.10.6
+# TensorRT conversion dependencies
+onnx>=1.12.0
+onnx-graphsurgeon
+tensorrt>=8.6.0
+pycuda>=2022.1
