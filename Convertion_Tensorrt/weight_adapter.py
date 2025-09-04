@@ -16,6 +16,7 @@ from collections import Counter
 
 RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^module\."), ""),
+    (re.compile(r"^matcher\.model\.encoder\."), "encoder."),
     (re.compile(r"^matcher\.model\."), ""),
     (re.compile(r"^matcher\."), ""),
     (re.compile(r"^model\."), ""),
@@ -23,6 +24,7 @@ RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^vit\."), "encoder.dino."),
     (re.compile(r"^dino\."), "encoder.dino."),
     (re.compile(r"^encoder\.vit\."), "encoder.dino."),
+    (re.compile(r"^encoder\.dino\."), "encoder.dino."),  # direct match
     (re.compile(r"^encoder\."), "encoder."),  # identity
 ]
 
