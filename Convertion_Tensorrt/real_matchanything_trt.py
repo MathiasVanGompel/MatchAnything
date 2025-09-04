@@ -68,7 +68,11 @@ class RealMatchAnythingTRT(nn.Module):
         self.net = PL_LoFTR(config, pretrained_ckpt=None, test_mode=True).matcher
         self.net.eval()
         
-        print(f"[MODEL] Created {model_name} model")
+        # Apply ONNX-compatibility patches
+        from patch_dinov2_for_onnx import patch_all_dinov2_models
+        patch_all_dinov2_models(self.net)
+        
+        print(f"[MODEL] Created {model_name} model with ONNX patches")
     
     def load_checkpoint(self, ckpt_path: str):
         """Load checkpoint into the real MatchAnything model"""
