@@ -107,14 +107,14 @@ python3 matchanything_to_trt_full.py \
 
 #### Step 2: Build TensorRT Engine
 ```bash
-trtexec \
-    --onnx=out/roma_dino_gp_dynamic.onnx \
-    --saveEngine=out/roma_dino_gp.plan \
-    --explicitBatch --fp16 --workspace=2048 \
-    --minShapes=image0:1x3x224x224,image1:1x3x224x224 \
-    --optShapes=image0:1x3x448x448,image1:1x3x448x448 \
-    --maxShapes=image0:1x3x896x896,image1:1x3x896x896 \
-    --buildOnly
+/usr/src/tensorrt/bin/trtexec \
+    --onnx=out/accurate_matchanything_roma.onnx \
+    --saveEngine=out/accurate_matchanything_roma.plan \
+    --fp16 --memPoolSize=workspace:4096M \
+    --minShapes=image0:1x3x416x416,image1:1x3x416x416 \
+    --optShapes=image0:1x3x832x832,image1:1x3x832x832 \
+    --maxShapes=image0:1x3x1664x1664,image1:1x3x1664x1664 \
+    --skipInference
 ```
 
 ## Running Inference

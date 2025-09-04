@@ -143,12 +143,11 @@ MAX_W=$((W * 2))
 TRTEXEC_ARGS=(
     "--onnx=${ONNX_PATH}"
     "--saveEngine=${ENGINE_PATH}"
-    "--explicitBatch"
-    "--workspace=${WORKSPACE_MB}"
+    "--memPoolSize=workspace:${WORKSPACE_MB}M"
     "--minShapes=image0:1x3x${MIN_H}x${MIN_W},image1:1x3x${MIN_H}x${MIN_W}"
     "--optShapes=image0:1x3x${H}x${W},image1:1x3x${H}x${W}"
     "--maxShapes=image0:1x3x${MAX_H}x${MAX_W},image1:1x3x${MAX_H}x${MAX_W}"
-    "--buildOnly"
+    "--skipInference"
     "--verbose"
     "--profilingVerbosity=detailed"
 )

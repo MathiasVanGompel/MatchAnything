@@ -121,14 +121,14 @@ def main():
     
     print("\nNext: Build TensorRT engine with trtexec:")
     print("\nRecommended command:")
-    print(f"trtexec \\")
+    print(f"/usr/src/tensorrt/bin/trtexec \\")
     print(f"    --onnx={onnx_path} \\")
     print(f"    --saveEngine={engine_path} \\")
-    print(f"    --explicitBatch --fp16 --workspace=4096 \\")
+    print(f"    --fp16 --memPoolSize=workspace:4096M \\")
     print(f"    --minShapes=image0:1x3x{args.H//2}x{args.W//2},image1:1x3x{args.H//2}x{args.W//2} \\")
     print(f"    --optShapes=image0:1x3x{args.H}x{args.W},image1:1x3x{args.H}x{args.W} \\")
     print(f"    --maxShapes=image0:1x3x{args.H*2}x{args.W*2},image1:1x3x{args.H*2}x{args.W*2} \\")
-    print(f"    --buildOnly --verbose")
+    print(f"    --skipInference --verbose")
     
     print(f"\nThen run inference:")
     print(f"python3 run_accurate_matchanything_trt.py \\")
