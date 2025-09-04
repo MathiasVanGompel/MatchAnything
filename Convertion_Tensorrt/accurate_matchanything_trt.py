@@ -121,9 +121,9 @@ class AccurateMatchAnythingTRT(nn.Module):
         img0_gray = np.array(Image.fromarray(img0).convert("L"))
         img1_gray = np.array(Image.fromarray(img1).convert("L"))
         
-        # Resize with padding (df=32 to match original)
-        (img0_gray, hw0_new, mask0) = self.resize_with_padding(img0_gray, df=32)
-        (img1_gray, hw1_new, mask1) = self.resize_with_padding(img1_gray, df=32)
+        # Resize with padding (df=14 to ensure multiples of 14, not 32!)
+        (img0_gray, hw0_new, mask0) = self.resize_with_padding(img0_gray, df=14)
+        (img1_gray, hw1_new, mask1) = self.resize_with_padding(img1_gray, df=14)
         
         # Convert to tensors
         img0_tensor = torch.from_numpy(img0_gray)[None][None] / 255.0
@@ -166,33 +166,20 @@ class AccurateMatchAnythingTRT(nn.Module):
         Returns:
             Dictionary with keypoints0, keypoints1, and mconf (confidence scores)
         """
-        # Preprocess images exactly like the original
-        batch = self.preprocess_images(image0, image1)
-        
-        # Move to device
         device = image0.device
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                batch[k] = v.to(device)
+        B, C, H, W = image0.shape
         
-        # Extract features using our TensorRT-optimized encoder
-        img0_gray = batch['image0']
-        img1_gray = batch['image1']
+        # For ONNX export, use simplified preprocessing
+        # Convert RGB to grayscale (simple average)
+        img0_gray = 0.299 * image0[:, 0:1] + 0.587 * image0[:, 1:2] + 0.114 * image0[:, 2:3]
+        img1_gray = 0.299 * image1[:, 0:1] + 0.587 * image1[:, 1:2] + 0.114 * image1[:, 2:3]
         
-        # Get features at coarse level (1/8 resolution for LoFTR-style matching)
+        # Get features at coarse level (1/14 resolution for DINOv2)
         feat0_dict = self.encoder(img0_gray)
         feat1_dict = self.encoder(img1_gray)
         
-        feat0_c = feat0_dict['coarse']  # [B, C, H/8, W/8]
-        feat1_c = feat1_dict['coarse']  # [B, C, H/8, W/8]
-        
-        # Apply masks if present
-        if 'mask0' in batch:
-            mask0_c = batch['mask0']  # [B, H/8, W/8]
-            mask1_c = batch['mask1']  # [B, H/8, W/8]
-            # Zero out features where mask is False
-            feat0_c = feat0_c * mask0_c.unsqueeze(1).float()
-            feat1_c = feat1_c * mask1_c.unsqueeze(1).float()
+        feat0_c = feat0_dict['coarse']  # [B, C, H/14, W/14]
+        feat1_c = feat1_dict['coarse']  # [B, C, H/14, W/14]
         
         # Coarse matching using our GP matcher
         warp_c, cert_c = self.matcher(feat0_c, feat1_c)  # [B,Ha,Wa,2], [B,Ha,Wa]
@@ -209,9 +196,9 @@ class AccurateMatchAnythingTRT(nn.Module):
         if conf_indices.shape[0] == 0:
             # No confident matches found
             return {
-                "keypoints0": torch.empty((0, 2), dtype=torch.float32),
-                "keypoints1": torch.empty((0, 2), dtype=torch.float32),
-                "mconf": torch.empty((0,), dtype=torch.float32),
+                "keypoints0": torch.empty((0, 2), dtype=torch.float32, device=device),
+                "keypoints1": torch.empty((0, 2), dtype=torch.float32, device=device),
+                "mconf": torch.empty((0,), dtype=torch.float32, device=device),
             }
         
         # Extract match coordinates and confidences
@@ -225,16 +212,8 @@ class AccurateMatchAnythingTRT(nn.Module):
         mconf = cert_c[batch_idx, y_coords, x_coords]  # [N]
         
         # Convert from coarse coordinates to original image coordinates
-        # Coarse features are at 1/8 resolution due to encoder downsampling
-        scale_factor = 8.0
-        
-        # For ELoFTR, we need to apply the hw_new scaling
-        if self.model_name == 'matchanything_eloftr':
-            hw0_new = batch['hw0_new']  # [h_scale, w_scale]
-            hw1_new = batch['hw1_new']  # [h_scale, w_scale]
-            
-            mkpts0_c *= torch.tensor([hw0_new[1], hw0_new[0]], device=device)  # [w_scale, h_scale]
-            mkpts1_c *= torch.tensor([hw1_new[1], hw1_new[0]], device=device)  # [w_scale, h_scale]
+        # Coarse features are at 1/14 resolution due to DINOv2 downsampling
+        scale_factor = 14.0
         
         # Scale to full resolution
         mkpts0_f = mkpts0_c * scale_factor
