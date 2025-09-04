@@ -36,6 +36,15 @@ The key TensorRT-specific dependencies are:
 
 ## Quick Start
 
+### Step 0: Environment Check
+First, verify your environment is ready:
+```bash
+python3 setup_environment.py
+```
+This will check for CUDA, TensorRT, Python dependencies, and ROMA installation.
+
+**Note**: It's normal for checks to "fail" in development environments without GPU support. The key requirement is that ROMA is found and accessible.
+
 ### Option 1: Automated Build (Recommended)
 ```bash
 # Basic conversion (no checkpoint)
@@ -48,7 +57,13 @@ The key TensorRT-specific dependencies are:
 ./build_tensorrt.sh --height 672 --width 672 --workspace 4096
 ```
 
-### Option 2: Manual Steps
+### Option 2: Example Workflow
+For a complete walkthrough:
+```bash
+python3 example_usage.py --checkpoint /path/to/checkpoint.ckpt --image1 img1.jpg --image2 img2.jpg
+```
+
+### Option 3: Manual Steps
 
 #### Step 1: Export to ONNX
 ```bash

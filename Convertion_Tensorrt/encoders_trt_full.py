@@ -6,7 +6,22 @@ import torch.nn.functional as F
 
 # --- make your ROMA repo importable ---
 import os
-ROMA_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "imcui", "third_party", "MatchAnything", "third_party", "ROMA")
+# Try multiple possible ROMA paths
+ROMA_PATHS = [
+    "/home/mathias/MatchAnything-1/imcui/third_party/MatchAnything/third_party/ROMA",  # Your specific path
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "imcui", "third_party", "MatchAnything", "third_party", "ROMA"),  # Relative path
+    os.environ.get("ROMA_ROOT", ""),  # Environment variable
+]
+
+ROMA_ROOT = None
+for path in ROMA_PATHS:
+    if path and os.path.exists(path):
+        ROMA_ROOT = path
+        break
+
+if ROMA_ROOT is None:
+    raise RuntimeError(f"ROMA not found in any of these paths: {ROMA_PATHS}")
+
 if ROMA_ROOT not in sys.path:
     sys.path.append(ROMA_ROOT)
 
@@ -21,6 +36,7 @@ def _first_present(d: Dict[str, torch.Tensor], keys) -> Optional[torch.Tensor]:
     return None
 
 def _tokens_from_dino(out) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    # Expect dict with patch tokens + optional cls token (ROMA style)
     if isinstance(out, torch.Tensor):
         return out, None
     if not isinstance(out, dict):
@@ -33,11 +49,22 @@ def _tokens_from_dino(out) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         cls = cls[:, 0, :]
     return patch, cls
 
+def _best_factor_pair(n: int) -> Tuple[int, int]:
+    """
+    Find factors (gh,gw) such that gh*gw = n, preferring near-square.
+    Guarantees an exact product; avoids using runtime tensors or floats.
+    """
+    s = int(math.sqrt(max(n, 1)))
+    for d in range(s, 0, -1):
+        if n % d == 0:
+            return d, n // d
+    return n, 1  # fallback (shouldn't happen)
+
 def _patch_interpolate_pos_encoding(dino_module: nn.Module, patch_size: int = 14):
     """
     Monkey-patch DINO's interpolate_pos_encoding to be ONNX-safe and to return
-    PATCH-ONLY positions (no CLS). Use integer `size=(gh,gw)` instead of
-    Tensor scale_factors to avoid ONNX export issues with bicubic. :contentReference[oaicite:1]{index=1}
+    CLS+PATCH positions (same length as x). Use integer size=(gh,gw) instead of
+    Tensor scale_factors to avoid ONNX export issues with bicubic. :contentReference[oaicite:2]{index=2}
     """
     if not hasattr(dino_module, "interpolate_pos_encoding"):
         return
@@ -47,27 +74,33 @@ def _patch_interpolate_pos_encoding(dino_module: nn.Module, patch_size: int = 14
 
     def safe_interp(x: torch.Tensor, w: torch.Tensor, h: torch.Tensor):
         """
-        x : [B, N, C]  (PATCH TOKENS ONLY; no CLS)
-        return: [B, N, C] patch PE resized to current grid
+        x : [B, 1+N_now, C]  (CLS + PATCH tokens)
+        returns: [B, 1+N_now, C] positional embeddings
         """
-        # Pretrain grid side from pos_embed (strip CLS):
-        pe = pos_embed[:, 1:, :]  # [1, N_pre, C]
+        B, L, C = x.shape
+        if L <= 1:
+            # degenerate (no patches) -> just return CLS pos
+            return pos_embed[:, :1, :].expand(B, -1, -1)
+
+        # Strip CLS from pretrained PE and reshape to 2D grid
+        pe = pos_embed[:, 1:, :]        # [1, N_pre, C]
         n_pre = int(pe.shape[1])
         side_pre = int(round(math.sqrt(max(n_pre, 1))))
-        pe_4d = pe.reshape(1, side_pre, side_pre, dim).permute(0, 3, 1, 2)  # [1,C,Hpre,Wpre]
+        pe_4d = pe.reshape(1, side_pre, side_pre, dim).permute(0, 3, 1, 2)  # [1, C, Hpre, Wpre]
 
-        # Current token count (N) is known; for square inputs N = (H/patch)*(W/patch)
-        n_now = int(x.shape[1])
-        side_now = int(round(math.sqrt(max(n_now, 1))))
-        gh = side_now
-        gw = max(1, n_now // max(1, gh))  # works for rectangular too
+        # Current patch token count (exclude CLS)
+        N_now = L - 1
+        gh, gw = _best_factor_pair(N_now)
 
-        # ONNX-safe: pass integer size (gh,gw), NOT Tensor scale_factors
+        # ONNX-safe: specify integer output size, not Tensor scale_factors
         pe_resized = F.interpolate(pe_4d, size=(int(gh), int(gw)),
                                    mode="bicubic", align_corners=False)
-        pe_tokens = pe_resized.permute(0, 2, 3, 1).reshape(1, gh * gw, dim)  # [1,N,C]
-        # Broadcast to batch
-        return pe_tokens.expand(x.shape[0], -1, -1)
+        pe_tokens = pe_resized.permute(0, 2, 3, 1).reshape(1, gh * gw, dim)  # [1, N_now, C]
+
+        # Concatenate CLS positional token in front and broadcast over batch
+        cls_tok = pos_embed[:, :1, :]  # [1,1,C]
+        full = torch.cat([cls_tok, pe_tokens], dim=1)  # [1, 1+N_now, C]
+        return full.expand(B, -1, -1)
 
     dino_module.interpolate_pos_encoding = safe_interp  # type: ignore
 
@@ -104,21 +137,14 @@ class CNNandDinov2TRT(nn.Module):
         if self.amp: x_in = x_in.to(self.amp_dtype)
 
         out = self.dino.forward_features(x_in)
-        tokens, cls = _tokens_from_dino(out)  # tokens are PATCH ONLY
+        tokens, cls = _tokens_from_dino(out)  # PATCH tokens (normalized)
 
+        # Expected coarse grid from the current spatial size
+        gh, gw = H // self.patch, W // self.patch
         N = tokens.size(1)
-        gh, gw = H // self.patch, W // self.patch  # for 448 & p=14: 32×32 => N=1024
         if N != gh * gw:
-            # fallback for odd shapes
-            side = int(round(math.sqrt(max(N, 1))))
-            if side * side == N:
-                gh = side; gw = side
-            elif (N % gw) == 0:
-                gh = N // gw
-            elif (N % gh) == 0:
-                gw = N // gh
-            else:
-                raise RuntimeError(f"Cannot reshape tokens (N={N}) to grid {gh}x{gw}")
+            # Fallback if DINO decided a different tokenization internally; trust N
+            gh, gw = _best_factor_pair(N)
 
         feat = tokens.reshape(B, gh, gw, tokens.size(2)).permute(0, 3, 1, 2).contiguous()  # [B,1024,gh,gw]
         feat = self.proj(feat)
