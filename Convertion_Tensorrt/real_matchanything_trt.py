@@ -103,13 +103,22 @@ class RealMatchAnythingTRT(nn.Module):
         
         # Apply ONNX patches after weights are loaded
         print("[PATCH] Applying ONNX-compatibility patches...")
-        from patch_dinov2_for_onnx import patch_all_dinov2_models
-        patch_success = patch_all_dinov2_models(self.net)
         
-        if patch_success:
-            print("[PATCH] Successfully applied ONNX patches")
+        # Try direct patching first (more targeted)
+        from direct_dinov2_patch import patch_dinov2_direct
+        direct_patch_success = patch_dinov2_direct(self.net)
+        
+        if direct_patch_success:
+            print("[PATCH] Successfully applied direct ONNX patches")
         else:
-            print("[PATCH] Warning: No DINOv2 modules found to patch")
+            print("[PATCH] Direct patching failed, trying fallback...")
+            # Fallback to general patching
+            from patch_dinov2_for_onnx import patch_all_dinov2_models
+            fallback_success = patch_all_dinov2_models(self.net)
+            if fallback_success:
+                print("[PATCH] Successfully applied fallback ONNX patches")
+            else:
+                print("[PATCH] Warning: No DINOv2 modules found to patch")
         
         return len(missing) == 0 and len(unexpected) == 0
     
