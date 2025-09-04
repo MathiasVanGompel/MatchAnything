@@ -87,8 +87,12 @@ echo
 # Create output directory
 mkdir -p "${OUT_DIR}"
 
-# Step 1: Export to ONNX using real implementation
-echo "Step 1: Exporting real MatchAnything model to ONNX..."
+# Step 1: Patch DINOv2 source file for ONNX compatibility
+echo "Step 1: Patching DINOv2 source for ONNX export..."
+python3 "${SCRIPT_DIR}/fix_dinov2_source.py"
+
+# Step 2: Export to ONNX using real implementation
+echo "Step 2: Exporting real MatchAnything model to ONNX..."
 ONNX_PATH="${OUT_DIR}/real_${MODEL}.onnx"
 
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH}"
@@ -106,8 +110,8 @@ fi
 echo "ONNX export completed: $ONNX_PATH"
 echo
 
-# Step 2: Convert ONNX to TensorRT
-echo "Step 2: Converting ONNX to TensorRT engine..."
+# Step 3: Convert ONNX to TensorRT
+echo "Step 3: Converting ONNX to TensorRT engine..."
 
 # Check if trtexec is available
 TRTEXEC_PATH="/usr/src/tensorrt/bin/trtexec"
@@ -162,7 +166,7 @@ fi
 echo "TensorRT engine created: $ENGINE_PATH"
 echo
 
-# Step 3: Display usage instructions
+# Step 4: Display usage instructions
 echo "=== Conversion Complete ==="
 echo "Engine file: $ENGINE_PATH"
 echo
