@@ -120,15 +120,34 @@ def patch_all_dinov2_models(model):
         
         # Look for specific module patterns
         for name, module in model.named_modules():
-            if ('dinov2' in name.lower() or 'vit' in name.lower() or 
-                hasattr(module, 'interpolate_pos_encoding')):
-                print(f"[DEBUG] Checking module: {name} -> {type(module)}")
-                if hasattr(module, 'interpolate_pos_encoding'):
+            # More aggressive search - check all modules
+            module_type = str(type(module))
+            has_interpolate = hasattr(module, 'interpolate_pos_encoding')
+            has_pos_embed = hasattr(module, 'pos_embed')
+            
+            if (has_interpolate or 'dinov2' in module_type.lower() or 'vit' in module_type.lower() or
+                'dinov2' in name.lower() or 'vit' in name.lower()):
+                print(f"[DEBUG] Checking module: {name} -> {module_type}")
+                print(f"        has_interpolate: {has_interpolate}, has_pos_embed: {has_pos_embed}")
+                
+                if has_interpolate:
                     try:
                         patch_dinov2_interpolate_pos_encoding(module)
                         patched_count += 1
                         print(f"[PATCH] Direct-patched DINOv2 at: {name}")
                     except Exception as e:
                         print(f"[DEBUG] Direct patch failed for {name}: {e}")
+                
+                # Also check children of this module
+                for child_name, child_module in module.named_children():
+                    child_full_name = f"{name}.{child_name}"
+                    if hasattr(child_module, 'interpolate_pos_encoding'):
+                        print(f"[DEBUG] Found child with interpolate: {child_full_name}")
+                        try:
+                            patch_dinov2_interpolate_pos_encoding(child_module)
+                            patched_count += 1
+                            print(f"[PATCH] Patched child DINOv2 at: {child_full_name}")
+                        except Exception as e:
+                            print(f"[DEBUG] Child patch failed for {child_full_name}: {e}")
     
     return patched_count > 0

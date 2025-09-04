@@ -10,6 +10,10 @@ import torch
 import torch.nn as nn
 from typing import Dict, Optional
 
+# Apply DINOv2 patches before any imports
+from patch_dinov2_source import apply_global_dinov2_patch
+apply_global_dinov2_patch()
+
 # Add MatchAnything to path
 MATCHANYTHING_PATH = Path(__file__).parent / "../imcui/third_party/MatchAnything"
 sys.path.append(str(MATCHANYTHING_PATH))
@@ -19,6 +23,7 @@ try:
     from src.lightning.lightning_loftr import PL_LoFTR
     from src.config.default import get_cfg_defaults
     MATCHANYTHING_AVAILABLE = True
+    print("[IMPORT] Successfully imported MatchAnything components")
 except ImportError as e:
     print(f"Warning: Could not import MatchAnything components: {e}")
     MATCHANYTHING_AVAILABLE = False
@@ -68,9 +73,8 @@ class RealMatchAnythingTRT(nn.Module):
         self.net = PL_LoFTR(config, pretrained_ckpt=None, test_mode=True).matcher
         self.net.eval()
         
-        # Apply ONNX-compatibility patches
-        from patch_dinov2_for_onnx import patch_all_dinov2_models
-        patch_all_dinov2_models(self.net)
+        # Apply ONNX-compatibility patches after checkpoint loading
+        # (patching will be done in load_checkpoint method)
         
         print(f"[MODEL] Created {model_name} model with ONNX patches")
     
@@ -96,6 +100,16 @@ class RealMatchAnythingTRT(nn.Module):
             print(f"  Sample missing: {missing[:5]}")
         if unexpected:
             print(f"  Sample unexpected: {unexpected[:5]}")
+        
+        # Apply ONNX patches after weights are loaded
+        print("[PATCH] Applying ONNX-compatibility patches...")
+        from patch_dinov2_for_onnx import patch_all_dinov2_models
+        patch_success = patch_all_dinov2_models(self.net)
+        
+        if patch_success:
+            print("[PATCH] Successfully applied ONNX patches")
+        else:
+            print("[PATCH] Warning: No DINOv2 modules found to patch")
         
         return len(missing) == 0 and len(unexpected) == 0
     
