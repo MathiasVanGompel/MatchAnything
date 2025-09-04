@@ -33,6 +33,17 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/TensorRT-8.6.1.6/lib
 trtexec --help
 ```
 
+### Your Current Setup
+If you have TensorRT installed at `/usr/src/tensorrt/bin/trtexec`, you can:
+
+```bash
+# Test trtexec
+/usr/src/tensorrt/bin/trtexec --help
+
+# Our build script will automatically detect this path
+./build_accurate_tensorrt.sh
+```
+
 ### Option 3: Docker (No Installation Required)
 ```bash
 # Use NVIDIA's TensorRT container

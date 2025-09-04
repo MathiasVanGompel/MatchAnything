@@ -117,10 +117,19 @@ echo
 echo "Step 2: Converting ONNX to TensorRT engine..."
 
 # Check if trtexec is available
-if ! command -v trtexec &> /dev/null; then
-    echo "Error: trtexec not found. Please install TensorRT and add trtexec to PATH"
-    exit 1
+TRTEXEC_PATH="/usr/src/tensorrt/bin/trtexec"
+if [ ! -f "$TRTEXEC_PATH" ]; then
+    # Fallback to PATH
+    if ! command -v trtexec &> /dev/null; then
+        echo "Error: trtexec not found at $TRTEXEC_PATH or in PATH"
+        echo "Please check your TensorRT installation"
+        exit 1
+    else
+        TRTEXEC_PATH="trtexec"
+    fi
 fi
+
+echo "Using trtexec from: $TRTEXEC_PATH"
 
 # Build TensorRT engine
 ENGINE_PATH="${OUT_DIR}/accurate_${MODEL}.plan"
@@ -149,10 +158,10 @@ if [[ "$USE_FP16" == "true" ]]; then
 fi
 
 echo "Running trtexec with the following arguments:"
-echo "trtexec ${TRTEXEC_ARGS[*]}"
+echo "$TRTEXEC_PATH ${TRTEXEC_ARGS[*]}"
 echo
 
-trtexec "${TRTEXEC_ARGS[@]}"
+"$TRTEXEC_PATH" "${TRTEXEC_ARGS[@]}"
 
 if [[ ! -f "$ENGINE_PATH" ]]; then
     echo "Error: TensorRT engine build failed"
