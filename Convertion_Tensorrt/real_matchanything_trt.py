@@ -103,10 +103,12 @@ class RealMatchAnythingTRT(nn.Module):
         img0_gray = 0.299 * image0[:, 0:1] + 0.587 * image0[:, 1:2] + 0.114 * image0[:, 2:3]
         img1_gray = 0.299 * image1[:, 0:1] + 0.587 * image1[:, 1:2] + 0.114 * image1[:, 2:3]
         
-        # Create batch dictionary in LoFTR format
+        # Create batch dictionary with all required fields for ROMA
         batch = {
             'image0': img0_gray,
             'image1': img1_gray,
+            'image0_rgb_origin': image0,  # ROMA needs this
+            'image1_rgb_origin': image1,  # ROMA needs this
         }
         
         # Run the real MatchAnything model
