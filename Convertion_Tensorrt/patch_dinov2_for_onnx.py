@@ -118,36 +118,39 @@ def patch_all_dinov2_models(model):
         print("[PATCH] No DINOv2 modules found with standard detection")
         print("[PATCH] Trying direct module search...")
         
-        # Look for specific module patterns
+        # Look for specific module patterns and check ALL modules
         for name, module in model.named_modules():
-            # More aggressive search - check all modules
             module_type = str(type(module))
             has_interpolate = hasattr(module, 'interpolate_pos_encoding')
             has_pos_embed = hasattr(module, 'pos_embed')
             
-            if (has_interpolate or 'dinov2' in module_type.lower() or 'vit' in module_type.lower() or
-                'dinov2' in name.lower() or 'vit' in name.lower()):
-                print(f"[DEBUG] Checking module: {name} -> {module_type}")
-                print(f"        has_interpolate: {has_interpolate}, has_pos_embed: {has_pos_embed}")
-                
-                if has_interpolate:
-                    try:
-                        patch_dinov2_interpolate_pos_encoding(module)
-                        patched_count += 1
-                        print(f"[PATCH] Direct-patched DINOv2 at: {name}")
-                    except Exception as e:
-                        print(f"[DEBUG] Direct patch failed for {name}: {e}")
-                
-                # Also check children of this module
-                for child_name, child_module in module.named_children():
-                    child_full_name = f"{name}.{child_name}"
-                    if hasattr(child_module, 'interpolate_pos_encoding'):
-                        print(f"[DEBUG] Found child with interpolate: {child_full_name}")
+            # Check every module for debugging
+            print(f"[DEBUG] Module: {name} -> {module_type}")
+            print(f"        has_interpolate: {has_interpolate}, has_pos_embed: {has_pos_embed}")
+            
+            if has_interpolate:
+                print(f"[DEBUG] *** FOUND INTERPOLATE MODULE: {name} ***")
+                try:
+                    patch_dinov2_interpolate_pos_encoding(module)
+                    patched_count += 1
+                    print(f"[PATCH] *** SUCCESSFULLY PATCHED: {name} ***")
+                except Exception as e:
+                    print(f"[DEBUG] Patch failed for {name}: {e}")
+            
+            # Special check for dinov2_vitl14 modules
+            if 'dinov2' in name or 'vitl14' in name:
+                print(f"[DEBUG] *** POTENTIAL DINOV2: {name} ***")
+                # Check if this module has children that might have interpolate_pos_encoding
+                for attr_name in dir(module):
+                    if not attr_name.startswith('_'):
                         try:
-                            patch_dinov2_interpolate_pos_encoding(child_module)
-                            patched_count += 1
-                            print(f"[PATCH] Patched child DINOv2 at: {child_full_name}")
+                            attr = getattr(module, attr_name)
+                            if hasattr(attr, 'interpolate_pos_encoding'):
+                                print(f"[DEBUG] *** FOUND INTERPOLATE IN ATTR: {name}.{attr_name} ***")
+                                patch_dinov2_interpolate_pos_encoding(attr)
+                                patched_count += 1
+                                print(f"[PATCH] *** PATCHED ATTR: {name}.{attr_name} ***")
                         except Exception as e:
-                            print(f"[DEBUG] Child patch failed for {child_full_name}: {e}")
+                            pass  # Ignore attribute access errors
     
     return patched_count > 0
