@@ -16,10 +16,13 @@ from collections import Counter
 
 RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^module\."), ""),
+    # Handle MatchAnything LoFTR checkpoint structure
+    (re.compile(r"^matcher\.model\.encoder\.cnn\."), "encoder.layers."),
     (re.compile(r"^matcher\.model\.encoder\."), "encoder."),
     (re.compile(r"^matcher\.model\."), ""),
     (re.compile(r"^matcher\."), ""),
     (re.compile(r"^model\."), ""),
+    # Handle DINOv2 structure (if present)
     (re.compile(r"^backbone\."), "encoder.dino."),
     (re.compile(r"^vit\."), "encoder.dino."),
     (re.compile(r"^dino\."), "encoder.dino."),
