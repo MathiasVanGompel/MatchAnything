@@ -108,12 +108,13 @@ def patch_dinov2_interpolate_method(dinov2_model):
         w_int = max(1, min(w_int, 1000))  # Reasonable bounds
         h_int = max(1, min(h_int, 1000))
         
-        # ONNX-safe interpolation
+        # ONNX-safe interpolation without bicubic antialias kernel
         patch_pos_embed_resized = F.interpolate(
             patch_pos_embed_2d,
             size=(h_int, w_int),
-            mode='bicubic', 
-            align_corners=False
+            mode='bilinear',
+            align_corners=False,
+            antialias=False,
         )
         
         # Reshape back to sequence

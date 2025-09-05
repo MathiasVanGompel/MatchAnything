@@ -92,9 +92,11 @@ def _patch_interpolate_pos_encoding(dino_module: nn.Module, patch_size: int = 14
         N_now = L - 1
         gh, gw = _best_factor_pair(N_now)
 
-        # ONNX-safe: specify integer output size, not Tensor scale_factors
-        pe_resized = F.interpolate(pe_4d, size=(int(gh), int(gw)),
-                                   mode="bicubic", align_corners=False)
+        # ONNX-safe: specify integer output size and avoid bicubic/AA kernel
+        pe_resized = F.interpolate(
+            pe_4d, size=(int(gh), int(gw)), mode="bilinear",
+            align_corners=False, antialias=False
+        )
         pe_tokens = pe_resized.permute(0, 2, 3, 1).reshape(1, gh * gw, dim)  # [1, N_now, C]
 
         # Concatenate CLS positional token in front and broadcast over batch

@@ -204,7 +204,7 @@ def homo_warp_kpts(kpts0, norm_pixel_mat, homo_sample_normed, original_size0=Non
     original_size1: N * 2, (h, w)
     """
     normed_kpts0_h = norm_pixel_mat @ torch.cat([kpts0, torch.ones_like(kpts0[:, :, [0]])], dim=-1).transpose(2, 1)  # (N * 3 * L)
-    kpts_warpped_h = (torch.linalg.inv(norm_pixel_mat) @ homo_sample_normed @ normed_kpts0_h).transpose(2, 1)  # (N * L * 3)
+    kpts_warpped_h = (torch.inverse(norm_pixel_mat) @ homo_sample_normed @ normed_kpts0_h).transpose(2, 1)  # (N * L * 3)
     kpts_warpped = kpts_warpped_h[..., :2] / kpts_warpped_h[..., [2]]  # N * L * 2
     valid_mask = (kpts_warpped[..., 0] > 0) & (kpts_warpped[..., 0] < original_size1[:, [1]]) & (kpts_warpped[..., 1] > 0) \
                 & (kpts_warpped[..., 1] < original_size1[:, [0]])  # N * L
@@ -221,7 +221,7 @@ def homo_warp_kpts_with_mask(kpts0, scale, depth_mask, norm_pixel_mat, homo_samp
     original_size1: N * 2, (h, w)
     """
     normed_kpts0_h = norm_pixel_mat @ torch.cat([kpts0, torch.ones_like(kpts0[:, :, [0]])], dim=-1).transpose(2, 1)  # (N * 3 * L)
-    kpts_warpped_h = (torch.linalg.inv(norm_pixel_mat) @ homo_sample_normed @ normed_kpts0_h).transpose(2, 1)  # (N * L * 3)
+    kpts_warpped_h = (torch.inverse(norm_pixel_mat) @ homo_sample_normed @ normed_kpts0_h).transpose(2, 1)  # (N * L * 3)
     kpts_warpped = kpts_warpped_h[..., :2] / kpts_warpped_h[..., [2]]  # N * L * 2
     # get coarse-level depth_mask
     depth_mask_coarse = depth_mask[:, :, ::scale, ::scale]
@@ -242,7 +242,7 @@ def homo_warp_kpts_with_mask_f(kpts0, depth_mask, norm_pixel_mat, homo_sample_no
     original_size1: N * 2, (h, w)
     """
     normed_kpts0_h = norm_pixel_mat @ torch.cat([kpts0, torch.ones_like(kpts0[:, :, [0]])], dim=-1).transpose(2, 1)  # (N * 3 * L)
-    kpts_warpped_h = (torch.linalg.inv(norm_pixel_mat) @ homo_sample_normed @ normed_kpts0_h).transpose(2, 1)  # (N * L * 3)
+    kpts_warpped_h = (torch.inverse(norm_pixel_mat) @ homo_sample_normed @ normed_kpts0_h).transpose(2, 1)  # (N * L * 3)
     kpts_warpped = kpts_warpped_h[..., :2] / kpts_warpped_h[..., [2]]  # N * L * 2
     valid_mask = (kpts_warpped[..., 0] > 0) & (kpts_warpped[..., 0] < original_size1[:, [1]]) & (kpts_warpped[..., 1] > 0) \
                 & (kpts_warpped[..., 1] < original_size1[:, [0]]) & (depth_mask != 0)  # N * L

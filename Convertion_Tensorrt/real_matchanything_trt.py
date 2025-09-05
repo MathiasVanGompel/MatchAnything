@@ -9,6 +9,26 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from typing import Dict, Optional
+from torch.onnx import register_custom_op_symbolic
+import onnx
+import inspect
+# external_data_utils moved between ONNX versions; fall back to external_data_helper
+try:  # pragma: no cover - compatibility shim
+    from onnx import external_data_utils  # type: ignore
+except ImportError:  # pragma: no cover
+    from onnx import external_data_helper as external_data_utils  # type: ignore
+
+
+def _register_onnx_inverse():
+    """Map ``torch.linalg.inv`` to the ONNX ``Inverse`` op."""
+
+    def symbolic_linalg_inv(g, self):
+        return g.op("Inverse", self)
+
+    register_custom_op_symbolic("aten::linalg_inv", symbolic_linalg_inv, 17)
+
+
+_register_onnx_inverse()
 
 # Apply DINOv2 patches before any imports
 from patch_dinov2_source import apply_global_dinov2_patch
@@ -205,16 +225,30 @@ def export_real_matchanything_onnx(onnx_path: str, model_name: str = "matchanyth
         }
         
         os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
-        
-        torch.onnx.export(
-            model, (x1, x2), onnx_path,
+
+        export_kwargs = dict(
             input_names=["image0", "image1"],
             output_names=["keypoints0", "keypoints1", "mconf"],
             dynamic_axes=dynamic_axes,
             opset_version=17,
             do_constant_folding=True,
-            verbose=False
+            verbose=False,
         )
+        if "use_external_data_format" in inspect.signature(torch.onnx.export).parameters:
+            export_kwargs["use_external_data_format"] = True
+
+        torch.onnx.export(model, (x1, x2), onnx_path, **export_kwargs)
+
+
+        # Consolidate tensor data into a single external file to
+        # avoid missing or zero-sized weight shards during TensorRT parse
+        model_proto = onnx.load(onnx_path)
+        external_data_utils.convert_model_to_external_data(
+            model_proto,
+            all_tensors_to_one_file=True,
+            location=os.path.basename(onnx_path) + ".data",
+        )
+        onnx.save(model_proto, onnx_path)
         print(f"[ONNX] Exported real MatchAnything model -> {onnx_path}")
         return onnx_path
         

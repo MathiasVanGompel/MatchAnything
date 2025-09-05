@@ -487,7 +487,7 @@ def extract(model, image_0, conf):
                 image.shape[-2:],
             )
         )
-        image = F.resize(image, size=size_new, antialias=True)
+        image = F.resize(image, size=size_new, antialias=False)
         input_ = image.to(device, non_blocking=True)[None]
         data = {
             "image": input_,
