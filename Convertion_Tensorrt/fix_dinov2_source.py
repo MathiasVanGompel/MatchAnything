@@ -60,12 +60,12 @@ def patch_dinov2_interpolate_source():
         new_w = int(w0.item()) if torch.is_tensor(w0) else int(w0)
         new_h = max(1, new_h)  # Ensure positive
         new_w = max(1, new_w)  # Ensure positive
-        
+
         patch_pos_embed_2d = patch_pos_embed.reshape(1, grid_size, grid_size, dim).permute(0, 3, 1, 2)
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed_2d,
             size=(new_h, new_w),  # Use explicit size instead of scale_factor
-            mode="bicubic",  # Keep bicubic but disable antialias for ONNX compatibility
+            mode="bilinear",  # Use bilinear to avoid unsupported bicubic op
             align_corners=False,
             antialias=False  # Disable antialias to prevent aten::_upsample_bicubic2d_aa
         )'''
@@ -118,7 +118,7 @@ def restore_dinov2_original():
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed_2d,
             size=(new_h, new_w),  # Use explicit size instead of scale_factor
-            mode="bicubic",  # Keep bicubic but disable antialias for ONNX compatibility
+            mode="bilinear",  # Use bilinear to avoid unsupported bicubic op
             align_corners=False,
             antialias=False  # Disable antialias to prevent aten::_upsample_bicubic2d_aa
         )'''

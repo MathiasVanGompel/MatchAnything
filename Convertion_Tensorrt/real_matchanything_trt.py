@@ -9,6 +9,19 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from typing import Dict, Optional
+from torch.onnx import register_custom_op_symbolic
+
+
+def _register_onnx_inverse():
+    """Map ``torch.linalg.inv`` to the ONNX ``Inverse`` op."""
+
+    def symbolic_linalg_inv(g, self):
+        return g.op("Inverse", self)
+
+    register_custom_op_symbolic("aten::linalg_inv", symbolic_linalg_inv, 17)
+
+
+_register_onnx_inverse()
 
 # Apply DINOv2 patches before any imports
 from patch_dinov2_source import apply_global_dinov2_patch

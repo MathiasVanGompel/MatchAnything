@@ -35,8 +35,10 @@ def resize_and_padding(img, resize, padding=True):
     resize: aim (h, w)
     """
     c, h_org, w_org = img.shape
-    # img_resized = transforms.Resize(resize, InterpolationMode.BILINEAR)(img)
-    img_resized = transforms.Resize(resize, InterpolationMode.BICUBIC)(img)
+    # Use bilinear resize without antialiasing for ONNX compatibility
+    img_resized = transforms.Resize(
+        resize, InterpolationMode.BILINEAR, antialias=False
+    )(img)
 
     if padding:
         img_padded = torch.zeros((c, max(resize), max(resize)), device=img.device)
@@ -268,9 +270,10 @@ class TupleResizeNearestExact:
 
 
 class TupleResize(object):
-    def __init__(self, size, mode=InterpolationMode.BICUBIC):
+    def __init__(self, size, mode=InterpolationMode.BILINEAR):
         self.size = size
-        self.resize = transforms.Resize(size, mode)
+        # Disable antialias for ONNX compatibility
+        self.resize = transforms.Resize(size, mode, antialias=False)
     def __call__(self, im_tuple):
         return [self.resize(im) for im in im_tuple]
 
@@ -324,10 +327,13 @@ def cls_to_flow(cls, deterministic_sampling = True):
     res = round(math.sqrt(C))
     G = torch.meshgrid(*[torch.linspace(-1+1/res, 1-1/res, steps = res, device = device) for _ in range(2)])
     G = torch.stack([G[1],G[0]],dim=-1).reshape(C,2)
-    if deterministic_sampling:
+    if deterministic_sampling or torch.onnx.is_in_onnx_export():
         sampled_cls = cls.max(dim=1).indices
     else:
-        sampled_cls = torch.multinomial(cls.permute(0,2,3,1).reshape(B*H*W,C).softmax(dim=-1), 1).reshape(B,H,W)
+        sampled_cls = torch.multinomial(
+            cls.permute(0,2,3,1).reshape(B*H*W,C).softmax(dim=-1),
+            1
+        ).reshape(B,H,W)
     flow = G[sampled_cls]
     return flow
 
