@@ -263,7 +263,7 @@ class GP(nn.Module):
             with torch.no_grad():
                 K_yy_dig_zeromask = ((K_yy[torch.eye(h2 * w2, device=x.device, dtype=torch.bool).repeat(b, 1, 1)] == 0).reshape(b, -1))
             K_yy = K_yy + self.sigma_noise * K_yy_dig_zeromask[..., None] * torch.eye(h2 * w2, device=x.device)[None, :, :]
-            K_yy_inv = torch.linalg.inv(K_yy)
+            K_yy_inv = torch.inverse(K_yy)
 
         mu_x = K_xy.matmul(K_yy_inv.matmul(f))
         mu_x = rearrange(mu_x, "b (h w) d -> b d h w", h=h1, w=w1)
