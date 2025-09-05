@@ -65,8 +65,9 @@ def patch_dinov2_interpolate_source():
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed_2d,
             size=(new_h, new_w),  # Use explicit size instead of scale_factor
-            mode="bilinear",  # Use bilinear instead of bicubic for ONNX compatibility
-            align_corners=False
+            mode="bicubic",  # Keep bicubic but disable antialias for ONNX compatibility
+            align_corners=False,
+            antialias=False  # Disable antialias to prevent aten::_upsample_bicubic2d_aa
         )'''
     
     # Apply the patch
@@ -117,8 +118,9 @@ def restore_dinov2_original():
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed_2d,
             size=(new_h, new_w),  # Use explicit size instead of scale_factor
-            mode="bicubic",
-            align_corners=False
+            mode="bicubic",  # Keep bicubic but disable antialias for ONNX compatibility
+            align_corners=False,
+            antialias=False  # Disable antialias to prevent aten::_upsample_bicubic2d_aa
         )'''
     
     original_code = '''patch_pos_embed = nn.functional.interpolate(
