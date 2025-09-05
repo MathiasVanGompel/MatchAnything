@@ -57,12 +57,13 @@ def patch_dinov2_interpolate_pos_encoding(dinov2_model):
         w_int = max(1, w_int)
         h_int = max(1, h_int)
         
-        # Interpolate to target size with explicit parameters
+        # Interpolate to target size with explicit parameters, avoiding bicubic AA
         patch_pos_embed_resized = F.interpolate(
             patch_pos_embed_2d,
             size=(h_int, w_int),  # Use integer tuple, not scale_factors
-            mode='bicubic',
-            align_corners=False
+            mode='bilinear',
+            align_corners=False,
+            antialias=False,
         )
         
         # Reshape back to sequence
