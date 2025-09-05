@@ -190,7 +190,7 @@ class DinoVisionTransformer(nn.Module):
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed_2d,
             size=(new_h, new_w),  # Use explicit size instead of scale_factor
-            mode="bicubic",
+            mode="bilinear",  # Use bilinear instead of bicubic for ONNX compatibility
             align_corners=False
         )
 
