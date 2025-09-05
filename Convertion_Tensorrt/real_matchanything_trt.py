@@ -239,6 +239,7 @@ def export_real_matchanything_onnx(onnx_path: str, model_name: str = "matchanyth
 
         torch.onnx.export(model, (x1, x2), onnx_path, **export_kwargs)
 
+
         # Consolidate tensor data into a single external file to
         # avoid missing or zero-sized weight shards during TensorRT parse
         model_proto = onnx.load(onnx_path)
