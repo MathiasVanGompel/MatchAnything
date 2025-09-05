@@ -484,11 +484,17 @@ class RegressionMatcher(nn.Module):
         )
         expansion_factor = 4 if "balanced" in self.sample_mode else 1
 
+        if torch.onnx.is_in_onnx_export():
+            k = min(expansion_factor * num, certainty.shape[0])
+            topk = torch.topk(certainty, k=k).indices
+            good_matches, good_certainty = matches[topk], certainty[topk]
+            return good_matches, good_certainty
+
         if certainty.sum() == 0:
             certainty[0] = 1 # Corner case, to avoid following multinormal error
         try:
-            good_samples = torch.multinomial(certainty, 
-                            num_samples = min(expansion_factor*num, len(certainty)), 
+            good_samples = torch.multinomial(certainty,
+                            num_samples = min(expansion_factor*num, len(certainty)),
                             replacement=False)
         except:
             return matches[[0]], certainty[[0]]
@@ -498,8 +504,8 @@ class RegressionMatcher(nn.Module):
         density = kde(good_matches, std=0.1)
         p = 1 / (density+1)
         p[density < 10] = 1e-7 # Basically should have at least 10 perfect neighbours, or around 100 ok ones
-        balanced_samples = torch.multinomial(p, 
-                          num_samples = min(num,len(good_certainty)), 
+        balanced_samples = torch.multinomial(p,
+                          num_samples = min(num,len(good_certainty)),
                           replacement=False)
         return good_matches[balanced_samples], good_certainty[balanced_samples]
 
