@@ -907,7 +907,7 @@ def match(model, path_0, path_1, conf):
                 image.shape[-2:],
             )
         )
-        image = F.resize(image, size=size_new, antialias=True)
+        image = F.resize(image, size=size_new, antialias=False)
         scale = np.array(size) / np.array(size_new)[::-1]
         return image, scale
 
