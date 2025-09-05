@@ -179,10 +179,19 @@ class DinoVisionTransformer(nn.Module):
         # see discussion at https://github.com/facebookresearch/dino/issues/8
         w0, h0 = w0 + 0.1, h0 + 0.1
 
+        # ONNX_PATCH_APPLIED - Use output_size instead of scale_factor for ONNX compatibility
+        grid_size = int(math.sqrt(N))
+        new_h = int(h0.item()) if torch.is_tensor(h0) else int(h0)
+        new_w = int(w0.item()) if torch.is_tensor(w0) else int(w0)
+        new_h = max(1, new_h)  # Ensure positive
+        new_w = max(1, new_w)  # Ensure positive
+        
+        patch_pos_embed_2d = patch_pos_embed.reshape(1, grid_size, grid_size, dim).permute(0, 3, 1, 2)
         patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
-            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
-            mode="bicubic",
+            patch_pos_embed_2d,
+            size=(new_h, new_w),  # Use explicit size instead of scale_factor
+            mode="bilinear",  # Use bilinear instead of bicubic for ONNX compatibility
+            align_corners=False
         )
 
         assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
