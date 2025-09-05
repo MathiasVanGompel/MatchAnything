@@ -11,7 +11,11 @@ import torch.nn as nn
 from typing import Dict, Optional
 from torch.onnx import register_custom_op_symbolic
 import onnx
-from onnx import external_data_utils
+# external_data_utils moved between ONNX versions; fall back to external_data_helper
+try:  # pragma: no cover - compatibility shim
+    from onnx import external_data_utils  # type: ignore
+except ImportError:  # pragma: no cover
+    from onnx import external_data_helper as external_data_utils  # type: ignore
 
 
 def _register_onnx_inverse():
