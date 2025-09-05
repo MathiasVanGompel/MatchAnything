@@ -14,7 +14,7 @@ import PIL
 from PIL import Image
 from pathlib import Path
 import inspect
-
+import os
 # ONNX utilities for export
 import onnx
 try:  # pragma: no cover - compatibility shim
@@ -325,6 +325,7 @@ def export_accurate_matchanything_onnx(
     """
     Export the accurate MatchAnything model to ONNX format.
     """
+    import os  # Fix: Add missing import
     device = "cpu"
     model = (
         AccurateMatchAnythingTRT(
