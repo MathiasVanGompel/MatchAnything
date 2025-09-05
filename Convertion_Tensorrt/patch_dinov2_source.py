@@ -68,12 +68,13 @@ def apply_global_dinov2_patch():
             w_int = max(1, w_int)
             h_int = max(1, h_int)
             
-            # Use ONNX-safe interpolation with integer size
+            # Use ONNX-safe interpolation with integer size, avoiding bicubic AA
             patch_pos_embed_resized = F.interpolate(
                 patch_pos_embed_2d,
                 size=(h_int, w_int),
-                mode='bicubic',
-                align_corners=False
+                mode='bilinear',
+                align_corners=False,
+                antialias=False,
             )
             
             # Reshape back
