@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 from typing import Dict, Optional
 from torch.onnx import register_custom_op_symbolic
+import onnx
+from onnx import external_data_utils
 
 
 def _register_onnx_inverse():
@@ -226,8 +228,19 @@ def export_real_matchanything_onnx(onnx_path: str, model_name: str = "matchanyth
             dynamic_axes=dynamic_axes,
             opset_version=17,
             do_constant_folding=True,
-            verbose=False
+            verbose=False,
+            use_external_data_format=True,
         )
+
+        # Consolidate tensor data into a single external file to
+        # avoid missing or zero-sized weight shards during TensorRT parse
+        model_proto = onnx.load(onnx_path)
+        external_data_utils.convert_model_to_external_data(
+            model_proto,
+            all_tensors_to_one_file=True,
+            location=os.path.basename(onnx_path) + ".data",
+        )
+        onnx.save(model_proto, onnx_path)
         print(f"[ONNX] Exported real MatchAnything model -> {onnx_path}")
         return onnx_path
         
