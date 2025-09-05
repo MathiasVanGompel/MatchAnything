@@ -105,7 +105,7 @@ def inv(mat):
     """ Invert a torch or numpy matrix
     """
     if isinstance(mat, torch.Tensor):
-        return torch.linalg.inv(mat)
+        return torch.inverse(mat)
     if isinstance(mat, np.ndarray):
         return np.linalg.inv(mat)
     raise ValueError(f'bad matrix type = {type(mat)}')

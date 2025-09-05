@@ -311,7 +311,7 @@ def read_megadepth_gray_sample_homowarp(path, resize=None, df=None, padding=Fals
 
     homo_warpped_image = homography_warp(
         image, # 1 * C * H * W
-        torch.linalg.inv(homo_sampled_normed),
+        torch.inverse(homo_sampled_normed),
         (h, w),
     )
     image = (homo_warpped_image[0].permute(1,2,0).numpy() * 255).astype(np.uint8)
