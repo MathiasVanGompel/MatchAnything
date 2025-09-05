@@ -4,6 +4,7 @@ Memory-efficient ONNX export to prevent VS Code crashes.
 This uses reduced workspace and batch size to minimize memory usage.
 """
 import os
+import sys
 import gc
 import torch
 import psutil
@@ -88,8 +89,7 @@ def memory_efficient_export(onnx_path, model_name="matchanything_roma", ckpt_pat
             },
             opset_version=16,  # Use lower opset for better compatibility
             do_constant_folding=True,
-            verbose=False,  # Reduce output to prevent VS Code overload
-            enable_onnx_checker=False  # Disable checker to save memory
+            verbose=False  # Reduce output to prevent VS Code overload
         )
         print(f"[SUCCESS] ONNX exported to: {onnx_path}")
         
