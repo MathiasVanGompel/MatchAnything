@@ -263,7 +263,7 @@ class GP(nn.Module):
             with torch.no_grad():
                 K_yy_dig_zeromask = ((K_yy[torch.eye(h2 * w2, device=x.device, dtype=torch.bool).repeat(b, 1, 1)] == 0).reshape(b, -1))
             K_yy = K_yy + self.sigma_noise * K_yy_dig_zeromask[..., None] * torch.eye(h2 * w2, device=x.device)[None, :, :]
-            K_yy_inv = torch.linalg.inv(K_yy)
+            K_yy_inv = torch.inverse(K_yy)
 
         mu_x = K_xy.matmul(K_yy_inv.matmul(f))
         mu_x = rearrange(mu_x, "b (h w) d -> b d h w", h=h1, w=w1)
@@ -484,11 +484,17 @@ class RegressionMatcher(nn.Module):
         )
         expansion_factor = 4 if "balanced" in self.sample_mode else 1
 
+        if torch.onnx.is_in_onnx_export():
+            k = min(expansion_factor * num, certainty.shape[0])
+            topk = torch.topk(certainty, k=k).indices
+            good_matches, good_certainty = matches[topk], certainty[topk]
+            return good_matches, good_certainty
+
         if certainty.sum() == 0:
             certainty[0] = 1 # Corner case, to avoid following multinormal error
         try:
-            good_samples = torch.multinomial(certainty, 
-                            num_samples = min(expansion_factor*num, len(certainty)), 
+            good_samples = torch.multinomial(certainty,
+                            num_samples = min(expansion_factor*num, len(certainty)),
                             replacement=False)
         except:
             return matches[[0]], certainty[[0]]
@@ -498,8 +504,8 @@ class RegressionMatcher(nn.Module):
         density = kde(good_matches, std=0.1)
         p = 1 / (density+1)
         p[density < 10] = 1e-7 # Basically should have at least 10 perfect neighbours, or around 100 ok ones
-        balanced_samples = torch.multinomial(p, 
-                          num_samples = min(num,len(good_certainty)), 
+        balanced_samples = torch.multinomial(p,
+                          num_samples = min(num,len(good_certainty)),
                           replacement=False)
         return good_matches[balanced_samples], good_certainty[balanced_samples]
 
