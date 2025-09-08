@@ -15,19 +15,31 @@ from torch import nn
 from collections import Counter
 
 RULES: List[Tuple[re.Pattern, str]] = [
+    # Remove common Lightning/module wrappers
     (re.compile(r"^module\."), ""),
-    # Handle MatchAnything LoFTR checkpoint structure
+    (re.compile(r"^_orig_mod\."), ""),
+    
+    # Handle MatchAnything specific structures
     (re.compile(r"^matcher\.model\.encoder\.cnn\."), "encoder.layers."),
     (re.compile(r"^matcher\.model\.encoder\."), "encoder."),
     (re.compile(r"^matcher\.model\."), ""),
     (re.compile(r"^matcher\."), ""),
     (re.compile(r"^model\."), ""),
-    # Handle DINOv2 structure (if present)
+    
+    # Handle various DINOv2 naming patterns
     (re.compile(r"^backbone\."), "encoder.dino."),
     (re.compile(r"^vit\."), "encoder.dino."),
     (re.compile(r"^dino\."), "encoder.dino."),
     (re.compile(r"^encoder\.vit\."), "encoder.dino."),
+    (re.compile(r"^encoder\.backbone\."), "encoder.dino."),
     (re.compile(r"^encoder\.dino\."), "encoder.dino."),  # direct match
+    
+    # Handle LoFTR/MatchAnything specific patterns
+    (re.compile(r"^loftr\."), ""),
+    (re.compile(r"^fine_preprocess\."), ""),
+    (re.compile(r"^coarse_preprocess\."), ""),
+    
+    # Generic encoder mapping
     (re.compile(r"^encoder\."), "encoder."),  # identity
 ]
 
