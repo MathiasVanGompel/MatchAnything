@@ -52,7 +52,8 @@ def _resize_pil_image(img, long_edge_size):
     if S > long_edge_size:
         interp = PIL.Image.LANCZOS
     elif S <= long_edge_size:
-        interp = PIL.Image.BICUBIC
+        # Use bilinear to avoid bicubic during ONNX export
+        interp = PIL.Image.BILINEAR
     new_size = tuple(int(round(x*long_edge_size/S)) for x in img.size)
     return img.resize(new_size, interp)
 
