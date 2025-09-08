@@ -72,7 +72,10 @@ This will check for CUDA, TensorRT, Python dependencies, and ROMA installation.
 ### Option 1: Accurate Version (⭐ **Recommended**)
 ```bash
 # Build accurate TensorRT engine that matches original exactly
-./build_accurate_tensorrt.sh --ckpt /path/to/matchanything_roma.ckpt
+./build_accurate_tensorrt.sh
+
+# Python helper (same behaviour as the shell script)
+python3 build_accurate_tensorrt.py
 
 # Custom settings
 ./build_accurate_tensorrt.sh \
