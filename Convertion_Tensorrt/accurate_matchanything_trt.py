@@ -243,23 +243,23 @@ class AccurateMatchAnythingTRT(nn.Module):
         # Get coordinates of confident matches
         conf_indices = torch.nonzero(conf_mask, as_tuple=False)  # [N, 3] (batch, y, x)
 
+        # Extract match coordinates and confidences. When no matches are found
+        # we return empty tensors that still depend on the network outputs to
+        # keep ONNX export graphs connected to the inputs.
         if conf_indices.shape[0] == 0:
-            # No confident matches found
-            return {
-                "keypoints0": torch.empty((0, 2), dtype=torch.float32, device=device),
-                "keypoints1": torch.empty((0, 2), dtype=torch.float32, device=device),
-                "mconf": torch.empty((0,), dtype=torch.float32, device=device),
-            }
-
-        # Extract match coordinates and confidences
-        batch_idx = conf_indices[:, 0]
-        y_coords = conf_indices[:, 1]
-        x_coords = conf_indices[:, 2]
-
-        # Get corresponding points in image1 from warp field
-        mkpts0_c = torch.stack([x_coords.float(), y_coords.float()], dim=1)  # [N, 2]
-        mkpts1_c = warp_c[batch_idx, y_coords, x_coords]  # [N, 2]
-        mconf = cert_c[batch_idx, y_coords, x_coords]  # [N]
+            batch_idx = torch.zeros(0, dtype=torch.long, device=device)
+            y_coords = torch.zeros(0, dtype=torch.long, device=device)
+            x_coords = torch.zeros(0, dtype=torch.long, device=device)
+            mkpts0_c = warp_c.view(-1, 2)[0:0]
+            mkpts1_c = warp_c.view(-1, 2)[0:0]
+            mconf = cert_c.view(-1)[0:0]
+        else:
+            batch_idx = conf_indices[:, 0]
+            y_coords = conf_indices[:, 1]
+            x_coords = conf_indices[:, 2]
+            mkpts0_c = torch.stack([x_coords.float(), y_coords.float()], dim=1)  # [N, 2]
+            mkpts1_c = warp_c[batch_idx, y_coords, x_coords]  # [N, 2]
+            mconf = cert_c[batch_idx, y_coords, x_coords]  # [N]
 
         # Convert from coarse coordinates to original image coordinates
         # Coarse features are at 1/16 resolution due to DINOv2 downsampling
