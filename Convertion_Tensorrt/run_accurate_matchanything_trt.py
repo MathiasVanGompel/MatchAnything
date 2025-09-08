@@ -152,6 +152,16 @@ class AccurateTensorRTEngine:
         print(f"Engine loaded: {engine_path}")
         print(f"Inputs: {self.input_names}")
         print(f"Outputs: {self.output_names}")
+
+    def get_optimal_resolution(self) -> Optional[Tuple[int, int]]:
+        """Return (width, height) from the engine's optimization profile."""
+        try:
+            idx = self.engine.get_binding_index("image0")
+            _, opt_shape, _ = self.engine.get_profile_shape(0, idx)
+            # opt_shape: (N, C, H, W)
+            return opt_shape[3], opt_shape[2]
+        except Exception:
+            return None
     
     def infer(self, image0: np.ndarray, image1: np.ndarray) -> Dict[str, np.ndarray]:
         """
@@ -275,8 +285,16 @@ def main():
     
     # Load and preprocess images
     print("Loading and preprocessing images...")
-    target_size = tuple(args.target_size) if args.target_size else None
-    
+    if args.target_size:
+        target_size = tuple(args.target_size)
+    else:
+        target = engine.get_optimal_resolution()
+        target_size = target
+        if target_size:
+            print(f"Using engine target size: {target_size[0]}x{target_size[1]}")
+        else:
+            print("Could not determine engine target size; using original image sizes")
+
     img0_rgb = load_image_rgb(args.image0, target_size)
     img1_rgb = load_image_rgb(args.image1, target_size)
     
