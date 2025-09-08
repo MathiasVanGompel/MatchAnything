@@ -2,10 +2,18 @@
 import argparse, os, sys
 from typing import Optional
 import torch
+import inspect
+
+# Always import ONNX utilities for external data handling
+import onnx
+try:  # pragma: no cover - compatibility shim
+    from onnx import external_data_utils  # type: ignore
+except ImportError:  # pragma: no cover
+    from onnx import external_data_helper as external_data_utils  # type: ignore
 
 # Optional ONNX graph surgery (EyeLike) support
 try:
-    import onnx, onnx_graphsurgeon as gs, numpy as np
+    import onnx_graphsurgeon as gs, numpy as np
     HAS_GS = True
 except Exception:
     HAS_GS = False
@@ -42,13 +50,27 @@ def export_matchanything_onnx(onnx_path: str, H: int, W: int,
         "cert":   {0: "B", 2: "H", 3: "W"},
     }
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
-    torch.onnx.export(
-        model, (x1, x2), onnx_path,
+
+    export_kwargs = dict(
         input_names=["image0", "image1"],
         output_names=["warp", "cert"],
         dynamic_axes=dynamic_axes,
-        opset_version=17, do_constant_folding=True,
+        opset_version=17,
+        do_constant_folding=True,
     )
+    if "use_external_data_format" in inspect.signature(torch.onnx.export).parameters:
+        export_kwargs["use_external_data_format"] = True
+
+    torch.onnx.export(model, (x1, x2), onnx_path, **export_kwargs)
+
+    # Consolidate tensor data into a single external file to avoid missing shards
+    model_proto = onnx.load(onnx_path)
+    external_data_utils.convert_model_to_external_data(
+        model_proto,
+        all_tensors_to_one_file=True,
+        location=os.path.basename(onnx_path) + ".data",
+    )
+    onnx.save(model_proto, onnx_path)
     print(f"[ONNX] Exported -> {onnx_path}")
     return onnx_path
 
@@ -71,7 +93,13 @@ def strip_eyelike_if_present(onnx_in: str, onnx_out: str):
         # but in most exports EyeLike isn't used downstream; keep it simple:
         node.inputs = []; node.outputs = []
     graph.cleanup().toposort()
-    onnx.save(gs.export_onnx(graph), onnx_out)
+    model = gs.export_onnx(graph)
+    external_data_utils.convert_model_to_external_data(
+        model,
+        all_tensors_to_one_file=True,
+        location=os.path.basename(onnx_out) + ".data",
+    )
+    onnx.save(model, onnx_out)
     print(f"[ONNX-GS] Rewrote EyeLike -> {onnx_out}")
     return onnx_out
 
