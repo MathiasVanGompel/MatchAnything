@@ -11,6 +11,14 @@ from typing import Dict, Tuple, Optional
 import cv2
 import PIL
 from PIL import Image
+import inspect
+
+# ONNX utilities for export
+import onnx
+try:  # pragma: no cover - compatibility shim
+    from onnx import external_data_utils  # type: ignore
+except ImportError:  # pragma: no cover
+    from onnx import external_data_helper as external_data_utils  # type: ignore
 
 from encoders_trt_full import CNNandDinov2TRT
 from gp_trt import GPMatchEncoderTRT
@@ -317,15 +325,27 @@ def export_accurate_matchanything_onnx(onnx_path: str, model_name: str = "matcha
     
     import os
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
-    
-    torch.onnx.export(
-        model, (x1, x2), onnx_path,
+
+    export_kwargs = dict(
         input_names=["image0", "image1"],
         output_names=["keypoints0", "keypoints1", "mconf"],
         dynamic_axes=dynamic_axes,
         opset_version=17,
         do_constant_folding=True,
-        verbose=False
+        verbose=False,
     )
+    if "use_external_data_format" in inspect.signature(torch.onnx.export).parameters:
+        export_kwargs["use_external_data_format"] = True
+
+    torch.onnx.export(model, (x1, x2), onnx_path, **export_kwargs)
+
+    # Consolidate tensor data into a single external file for TensorRT
+    model_proto = onnx.load(onnx_path)
+    external_data_utils.convert_model_to_external_data(
+        model_proto,
+        all_tensors_to_one_file=True,
+        location=os.path.basename(onnx_path) + ".data",
+    )
+    onnx.save(model_proto, onnx_path)
     print(f"[ONNX] Exported accurate model -> {onnx_path}")
     return onnx_path

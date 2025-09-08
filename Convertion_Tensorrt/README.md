@@ -55,6 +55,11 @@ The key TensorRT-specific dependencies are:
 
 ## Quick Start
 
+The ONNX export scripts generate a model file (`.onnx`) alongside a
+companion weights file (`.onnx.data`). Keep **both** files together when
+building or deploying with TensorRT; missing the `.data` file will cause
+weight-loading errors during `trtexec`.
+
 ### Step 0: Environment Check
 First, verify your environment is ready:
 ```bash
