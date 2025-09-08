@@ -55,6 +55,11 @@ The key TensorRT-specific dependencies are:
 
 ## Quick Start
 
+The ONNX export scripts generate a model file (`.onnx`) alongside a
+companion weights file (`.onnx.data`). Keep **both** files together when
+building or deploying with TensorRT; missing the `.data` file will cause
+weight-loading errors during `trtexec`.
+
 ### Step 0: Environment Check
 First, verify your environment is ready:
 ```bash
@@ -67,7 +72,10 @@ This will check for CUDA, TensorRT, Python dependencies, and ROMA installation.
 ### Option 1: Accurate Version (⭐ **Recommended**)
 ```bash
 # Build accurate TensorRT engine that matches original exactly
-./build_accurate_tensorrt.sh --ckpt /path/to/matchanything_roma.ckpt
+./build_accurate_tensorrt.sh
+
+# Python helper (same behaviour as the shell script)
+python3 build_accurate_tensorrt.py
 
 # Custom settings
 ./build_accurate_tensorrt.sh \

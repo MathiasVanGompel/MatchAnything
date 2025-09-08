@@ -5,18 +5,19 @@
 
 set -e
 
+# Directories
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUT_DIR="${SCRIPT_DIR}/out"
+
 # Configuration
-CKPT_PATH=""
+# Default checkpoint assumes repository layout
+CKPT_PATH="${SCRIPT_DIR}/../imcui/third_party/MatchAnything/weights/matchanything_roma.ckpt"
 MODEL="matchanything_roma"
 H=832
 W=832
 MATCH_THRESHOLD=0.1
 WORKSPACE_MB=4096
 USE_FP16=true
-
-# Directories
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="${SCRIPT_DIR}/out"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
