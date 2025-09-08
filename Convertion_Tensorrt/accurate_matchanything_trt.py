@@ -224,9 +224,13 @@ class AccurateMatchAnythingTRT(nn.Module):
             0.299 * image1[:, 0:1] + 0.587 * image1[:, 1:2] + 0.114 * image1[:, 2:3]
         )
 
+        # DINO expects 3-channel input; replicate grayscale to 3 channels
+        img0_3ch = img0_gray.repeat(1, 3, 1, 1)
+        img1_3ch = img1_gray.repeat(1, 3, 1, 1)
+
         # Get features at coarse level (1/16 resolution for DINOv2)
-        feat0_dict = self.encoder(img0_gray)
-        feat1_dict = self.encoder(img1_gray)
+        feat0_dict = self.encoder(img0_3ch)
+        feat1_dict = self.encoder(img1_3ch)
 
         feat0_c = feat0_dict["coarse"]  # [B, C, H/16, W/16]
         feat1_c = feat1_dict["coarse"]  # [B, C, H/16, W/16]
@@ -358,8 +362,11 @@ def export_accurate_matchanything_onnx(
         print("[INFO] No checkpoint provided, using random initialization")
 
     # Create dummy inputs
+    # Use IDENTICAL inputs to guarantee non-empty matches during export.
+    # This prevents ONNX from producing constant/empty outputs and pruning inputs.
+    torch.manual_seed(0)
     x1 = torch.rand(1, 3, H, W, device=device)
-    x2 = torch.rand(1, 3, H, W, device=device)
+    x2 = x1.clone()
 
     # Test forward pass
     with torch.no_grad():
@@ -368,6 +375,15 @@ def export_accurate_matchanything_onnx(
         print(f"  keypoints0: {result['keypoints0'].shape}")
         print(f"  keypoints1: {result['keypoints1'].shape}")
         print(f"  mconf: {result['mconf'].shape}")
+        # If no matches, relax threshold to force non-empty outputs for export
+        if result["mconf"].numel() == 0:
+            print("[WARN] No matches found in dry run; lowering match_threshold to 0.0 for export")
+            model.match_threshold = 0.0
+            result = model(x1, x2)
+            print("Retried dry run:")
+            print(f"  keypoints0: {result['keypoints0'].shape}")
+            print(f"  keypoints1: {result['keypoints1'].shape}")
+            print(f"  mconf: {result['mconf'].shape}")
 
     # Export to ONNX with dynamic axes
     dynamic_axes = {
