@@ -339,21 +339,49 @@ def export_accurate_matchanything_onnx(
     # Load checkpoint if provided
     if ckpt:
         print(f"[CKPT] Loading checkpoint: {ckpt}")
-        try:
-            from weight_adapter import remap_and_load
-
-            loaded_weights = remap_and_load(model, ckpt_path=ckpt, save_sanitized=None)
-            if len(loaded_weights) == 0:
-                print("[WARNING] No weights were loaded from checkpoint!")
-                print("[INFO] This might be due to architecture mismatch.")
-                print("[INFO] Proceeding with random initialization for testing...")
-            else:
-                print(
-                    f"[SUCCESS] Loaded {len(loaded_weights)} weight tensors from checkpoint"
+        
+        # If checkpoint doesn't exist but we have a default path, try to download
+        if not os.path.exists(ckpt):
+            print(f"[CKPT] Checkpoint not found at {ckpt}")
+            try:
+                from download_weights import download_matchanything_weights
+                print("[CKPT] Attempting to download MatchAnything weights...")
+                ckpt = download_matchanything_weights(
+                    output_dir=os.path.dirname(ckpt),
+                    force_download=False
                 )
-        except Exception as e:
-            print(f"[ERROR] Failed to load checkpoint: {e}")
-            print("[INFO] Proceeding with random initialization for testing...")
+            except Exception as e:
+                print(f"[CKPT] Failed to download weights: {e}")
+                print("[INFO] Proceeding with random initialization...")
+                ckpt = None
+        
+        if ckpt and os.path.exists(ckpt):
+            try:
+                from weight_adapter import remap_and_load
+
+                loaded_weights = remap_and_load(model, ckpt_path=ckpt, save_sanitized=None)
+                if len(loaded_weights) == 0:
+                    print("[WARNING] No weights were loaded from checkpoint!")
+                    print("[INFO] This might be due to architecture mismatch.")
+                    
+                    # Try direct loading as fallback
+                    print("[INFO] Attempting direct checkpoint loading...")
+                    checkpoint = torch.load(ckpt, map_location="cpu")
+                    state_dict = checkpoint.get('state_dict', checkpoint)
+                    
+                    # Try loading with strict=False to see what matches
+                    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+                    print(f"[INFO] Direct load: {len(state_dict) - len(missing)} loaded, {len(missing)} missing, {len(unexpected)} unexpected")
+                    
+                    if len(missing) < len(state_dict):
+                        print("[SUCCESS] Some weights loaded via direct method")
+                    else:
+                        print("[INFO] Proceeding with random initialization for testing...")
+                else:
+                    print(f"[SUCCESS] Loaded {len(loaded_weights)} weight tensors from checkpoint")
+            except Exception as e:
+                print(f"[ERROR] Failed to load checkpoint: {e}")
+                print("[INFO] Proceeding with random initialization for testing...")
     else:
         print("[INFO] No checkpoint provided, using random initialization")
 

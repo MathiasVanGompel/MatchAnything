@@ -16,7 +16,7 @@ from typing import Dict, Tuple, Optional
 import PIL.Image as Image
 
 def load_image_rgb(path: str, target_size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-    """Load image as RGB numpy array"""
+    """Load image as RGB numpy array with improved resizing"""
     if not os.path.exists(path):
         raise FileNotFoundError(f"Image not found: {path}")
     
@@ -25,7 +25,27 @@ def load_image_rgb(path: str, target_size: Optional[Tuple[int, int]] = None) -> 
     img = np.array(img)
     
     if target_size:
-        img = cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
+        # Use high-quality resizing that preserves aspect ratio
+        h, w = img.shape[:2]
+        target_w, target_h = target_size
+        
+        # Calculate scaling factor to maintain aspect ratio
+        scale = min(target_w / w, target_h / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        
+        # Resize with high quality interpolation
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        
+        # Pad to target size if needed
+        if new_w != target_w or new_h != target_h:
+            # Create black canvas
+            padded = np.zeros((target_h, target_w, 3), dtype=img.dtype)
+            # Center the image
+            y_offset = (target_h - new_h) // 2
+            x_offset = (target_w - new_w) // 2
+            padded[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = img
+            img = padded
     
     return img
 
@@ -187,7 +207,7 @@ class AccurateTensorRTEngine:
     
     def infer(self, image0: np.ndarray, image1: np.ndarray) -> Dict[str, np.ndarray]:
         """
-        Run inference on image pair.
+        Run inference on image pair with improved shape handling.
         
         Args:
             image0: Preprocessed image [1, C, H, W]
@@ -196,6 +216,31 @@ class AccurateTensorRTEngine:
         Returns:
             Dictionary with keypoints0, keypoints1, mconf
         """
+        # Ensure images have the same shape for matching
+        if image0.shape != image1.shape:
+            print(f"Warning: Image shapes differ: {image0.shape} vs {image1.shape}")
+            # Resize to common size (use the smaller dimensions to avoid OOM)
+            min_h = min(image0.shape[2], image1.shape[2])
+            min_w = min(image0.shape[3], image1.shape[3])
+            
+            if image0.shape[2] != min_h or image0.shape[3] != min_w:
+                image0 = torch.nn.functional.interpolate(
+                    torch.from_numpy(image0), 
+                    size=(min_h, min_w), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).numpy()
+            
+            if image1.shape[2] != min_h or image1.shape[3] != min_w:
+                image1 = torch.nn.functional.interpolate(
+                    torch.from_numpy(image1), 
+                    size=(min_h, min_w), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).numpy()
+            
+            print(f"Resized images to common shape: {image0.shape}")
+        
         # Set input shapes if dynamic
         for name in self.input_names:
             if name == "image0":
