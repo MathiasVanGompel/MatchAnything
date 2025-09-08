@@ -10,40 +10,31 @@ Convert the MatchAnything model from PyTorch to TensorRT for optimized inference
 
 ```
 Convertion_Tensorrt/
-├── matchanything_to_trt_full.py    # Main conversion script (PyTorch → ONNX)
-├── run_ma_trt.py                   # TensorRT inference runner
-├── weight_adapter.py               # Checkpoint weight remapping utilities
-├── encoders_trt_full.py            # TensorRT-optimized DINOv2 encoder
-├── gp_trt.py                       # Gaussian Process matcher
-├── roma_models_trt_full.py         # Main TensorRT model definition
-├── matcher_trt_full.py             # Additional matching components (future use)
-├── build_tensorrt.sh               # Automated build script
-├── setup_environment.py            # Environment verification script
-├── README.md                       # User documentation
-├── OVERVIEW.md                     # This file
-└── out/                            # Output directory for generated files
-    ├── roma_dino_gp_dynamic.onnx   # Generated ONNX model
-    └── roma_dino_gp.plan           # Generated TensorRT engine
+├── accurate_matchanything_trt.py     # Exact TensorRT replica of MatchAnything
+├── convert_accurate_matchanything.py # PyTorch → ONNX conversion
+├── run_accurate_matchanything_trt.py # TensorRT inference runner
+├── build_accurate_tensorrt.sh        # Automated build script
+├── build_accurate_tensorrt.py        # Python helper for build
+├── weight_adapter.py                 # Checkpoint weight remapping utilities
+├── encoders_trt_full.py              # TensorRT-optimized DINOv2 encoder
+├── gp_trt.py                         # Gaussian Process matcher
+├── matcher_trt_full.py               # Additional matching components (future use)
+├── setup_environment.py              # Environment verification script
+├── README.md                         # User documentation
+├── OVERVIEW.md                       # This file
+└── out/                              # Output directory for generated files
+    ├── accurate_matchanything_roma.onnx  # Generated ONNX model
+    └── accurate_matchanything_roma.plan  # Generated TensorRT engine
 ```
 
 ## 🔧 Key Components
 
-### 1. Model Architecture (`roma_models_trt_full.py`)
+### 1. Model Architecture (`accurate_matchanything_trt.py`)
 
-**RoMaTRTCoreFull**: Main TensorRT-optimized model
-- Simplified architecture focusing on core matching functionality
-- Combines DINOv2 encoder with Gaussian Process matcher
-- Outputs dense correspondence field and certainty map
-
-```python
-class RoMaTRTCoreFull(nn.Module):
-    def __init__(self, amp: bool = False, beta: float = 10.0):
-        self.encoder = CNNandDinov2TRT(amp=amp)
-        self.gp = GPMatchEncoderTRT(beta=beta)
-    
-    def forward(self, image0, image1) -> Tuple[warp, cert]:
-        # Extract features, compute matches, return dense correspondences
-```
+**AccurateMatchAnythingTRT**: Faithful TensorRT port of the original model
+- Includes exact preprocessing and postprocessing pipeline
+- Uses `CNNandDinov2TRT` encoder and `GPMatchEncoderTRT` matcher
+- Produces keypoints and confidence scores identical to the PyTorch version
 
 ### 2. Feature Encoder (`encoders_trt_full.py`)
 
@@ -71,10 +62,10 @@ Handles checkpoint format variations:
 - Key remapping for different model structures
 - Diagnostic tools for debugging weight loading issues
 
-### 5. Conversion Pipeline (`matchanything_to_trt_full.py`)
+### 5. Conversion Pipeline (`convert_accurate_matchanything.py`)
 
 Two-stage conversion process:
-1. **PyTorch → ONNX**: Export with dynamic axes and graph surgery
+1. **PyTorch → ONNX**: Export accurate model and pack weights into a single `.onnx.data` file
 2. **ONNX → TensorRT**: Use `trtexec` with optimized profiles
 
 ## 🚀 Performance Optimizations
@@ -118,21 +109,21 @@ graph TD
 
 2. **Automated Conversion**
    ```bash
-   ./build_tensorrt.sh --ckpt checkpoint.ckpt
+   ./build_accurate_tensorrt.sh --ckpt checkpoint.ckpt
    ```
 
 3. **Manual Conversion** (if needed)
    ```bash
    # Export ONNX
-   python3 matchanything_to_trt_full.py --ckpt checkpoint.ckpt
-   
+   python3 convert_accurate_matchanything.py --ckpt checkpoint.ckpt --onnx out/accurate.onnx
+
    # Build TensorRT engine
-   trtexec --onnx=model.onnx --saveEngine=engine.plan --fp16
+   trtexec --onnx=out/accurate.onnx --saveEngine=out/accurate.plan --fp16
    ```
 
 4. **Run Inference**
    ```bash
-   python3 run_ma_trt.py --engine engine.plan --image0 img1.jpg --image1 img2.jpg
+   python3 run_accurate_matchanything_trt.py --engine out/accurate.plan --image0 img1.jpg --image1 img2.jpg
    ```
 
 ## 📊 Expected Performance
