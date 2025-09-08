@@ -8,7 +8,6 @@ import inspect
 
 # Always import ONNX utilities for external data handling
 import onnx
-
 try:  # pragma: no cover - compatibility shim
     from onnx import external_data_utils  # type: ignore
 except ImportError:  # pragma: no cover
@@ -17,7 +16,6 @@ except ImportError:  # pragma: no cover
 # Optional ONNX graph surgery (EyeLike) support
 try:
     import onnx_graphsurgeon as gs
-
     HAS_GS = True
 except Exception:
     HAS_GS = False
@@ -88,7 +86,6 @@ def export_matchanything_onnx(
     out_dir = Path(onnx_path).parent
     for shard in out_dir.glob("onnx__*"):
         shard.unlink(missing_ok=True)
-
     print(f"[ONNX] Exported -> {onnx_path}")
     return onnx_path
 
@@ -124,7 +121,6 @@ def strip_eyelike_if_present(onnx_in: str, onnx_out: str):
     out_dir = Path(onnx_out).parent
     for shard in out_dir.glob("onnx__*"):
         shard.unlink(missing_ok=True)
-
     print(f"[ONNX-GS] Rewrote EyeLike -> {onnx_out}")
     return onnx_out
 

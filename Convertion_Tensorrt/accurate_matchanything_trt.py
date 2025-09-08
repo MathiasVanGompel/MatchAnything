@@ -17,7 +17,6 @@ import inspect
 
 # ONNX utilities for export
 import onnx
-
 try:  # pragma: no cover - compatibility shim
     from onnx import external_data_utils  # type: ignore
 except ImportError:  # pragma: no cover
