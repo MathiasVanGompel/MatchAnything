@@ -152,6 +152,38 @@ class AccurateTensorRTEngine:
         print(f"Engine loaded: {engine_path}")
         print(f"Inputs: {self.input_names}")
         print(f"Outputs: {self.output_names}")
+
+    def get_optimal_resolution(self) -> Optional[Tuple[int, int]]:
+        """Return the engine's preferred (width, height).
+
+        Uses the optimization profile if available, otherwise falls back to the
+        static binding shape. Returns ``None`` when neither can be queried.
+        """
+        try:
+            idx = self.engine.get_binding_index("image0")
+
+            # Try dynamic profile shape first
+            try:
+                _, opt_shape, _ = self.engine.get_profile_shape(0, idx)
+                if opt_shape[2] > 0 and opt_shape[3] > 0:
+                    return opt_shape[3], opt_shape[2]
+            except Exception:
+                pass
+
+            # Fallback to static binding shape
+            shape = self.engine.get_binding_shape(idx)
+            if len(shape) == 4:  # NCHW
+                h, w = shape[2], shape[3]
+            elif len(shape) == 3:  # CHW (implicit batch)
+                h, w = shape[1], shape[2]
+            else:
+                return None
+
+            if h > 0 and w > 0:
+                return w, h
+            return None
+        except Exception:
+            return None
     
     def infer(self, image0: np.ndarray, image1: np.ndarray) -> Dict[str, np.ndarray]:
         """
@@ -275,8 +307,20 @@ def main():
     
     # Load and preprocess images
     print("Loading and preprocessing images...")
-    target_size = tuple(args.target_size) if args.target_size else None
-    
+    engine_size = engine.get_optimal_resolution()
+    if args.target_size:
+        target_size = tuple(args.target_size)
+        if engine_size and target_size != engine_size:
+            print(
+                f"Warning: engine built for {engine_size[0]}x{engine_size[1]} but resizing to {target_size}"
+            )
+    else:
+        target_size = engine_size
+        if target_size:
+            print(f"Using engine target size: {target_size[0]}x{target_size[1]}")
+        else:
+            print("Could not determine engine target size; using original image sizes")
+
     img0_rgb = load_image_rgb(args.image0, target_size)
     img1_rgb = load_image_rgb(args.image1, target_size)
     
