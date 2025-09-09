@@ -27,11 +27,18 @@ The **accurate version** replicates the exact preprocessing and postprocessing p
 - `build_tensorrt.sh` - Basic build script
 
 ### 🔧 **Shared Components**
-- `weight_adapter.py` - Checkpoint weight remapping utilities
+- `improved_weight_adapter.py` - Robust checkpoint remapping used by default
+- `weight_adapter.py` - Legacy mapping utilities
 - `encoders_trt_full.py` - TensorRT-optimized encoder implementation
 - `gp_trt.py` - Gaussian Process matcher for TensorRT
 - `setup_environment.py` - Environment verification
 - `out/` - Output directory for ONNX and TensorRT files
+
+### 📝 **Additional Documentation**
+- `OVERVIEW.md` - High-level introduction to the conversion tools
+- `COMPARISON_ANALYSIS.md` - Detailed comparison of available conversion methods
+- `IMPROVEMENTS_SUMMARY.md` - Summary of implemented fixes and enhancements
+- `WEIGHT_LOADING_ANALYSIS.md` - In-depth review of weight adapters and DINOv2 integration
 
 ## Prerequisites
 

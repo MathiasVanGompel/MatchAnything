@@ -15,8 +15,10 @@ from PIL import Image
 from pathlib import Path
 import inspect
 import os
+
 # ONNX utilities for export
 import onnx
+
 try:  # pragma: no cover - compatibility shim
     from onnx import external_data_utils  # type: ignore
 except ImportError:  # pragma: no cover
@@ -257,7 +259,9 @@ class AccurateMatchAnythingTRT(nn.Module):
             batch_idx = conf_indices[:, 0]
             y_coords = conf_indices[:, 1]
             x_coords = conf_indices[:, 2]
-            mkpts0_c = torch.stack([x_coords.float(), y_coords.float()], dim=1)  # [N, 2]
+            mkpts0_c = torch.stack(
+                [x_coords.float(), y_coords.float()], dim=1
+            )  # [N, 2]
             mkpts1_c = warp_c[batch_idx, y_coords, x_coords]  # [N, 2]
             mconf = cert_c[batch_idx, y_coords, x_coords]  # [N]
 
@@ -325,7 +329,6 @@ def export_accurate_matchanything_onnx(
     """
     Export the accurate MatchAnything model to ONNX format.
     """
-    import os  # Fix: Add missing import
     device = "cpu"
     model = (
         AccurateMatchAnythingTRT(
@@ -340,46 +343,57 @@ def export_accurate_matchanything_onnx(
     # Load checkpoint if provided
     if ckpt:
         print(f"[CKPT] Loading checkpoint: {ckpt}")
-        
+
         # If checkpoint doesn't exist but we have a default path, try to download
         if not os.path.exists(ckpt):
             print(f"[CKPT] Checkpoint not found at {ckpt}")
             try:
                 from download_weights import download_matchanything_weights
+
                 print("[CKPT] Attempting to download MatchAnything weights...")
                 ckpt = download_matchanything_weights(
-                    output_dir=os.path.dirname(ckpt),
-                    force_download=False
+                    output_dir=os.path.dirname(ckpt), force_download=False
                 )
             except Exception as e:
                 print(f"[CKPT] Failed to download weights: {e}")
                 print("[INFO] Proceeding with random initialization...")
                 ckpt = None
-        
+
         if ckpt and os.path.exists(ckpt):
             try:
-                from weight_adapter import remap_and_load
+                from improved_weight_adapter import apply_improved_mapping
 
-                loaded_weights = remap_and_load(model, ckpt_path=ckpt, save_sanitized=None)
-                if len(loaded_weights) == 0:
+                # Map checkpoint keys to model keys and load the weights
+                model_state = model.state_dict()
+                loadable = apply_improved_mapping(ckpt, model_state)
+                model.load_state_dict(loadable, strict=False)
+
+                if len(loadable) == 0:
                     print("[WARNING] No weights were loaded from checkpoint!")
                     print("[INFO] This might be due to architecture mismatch.")
-                    
+
                     # Try direct loading as fallback
                     print("[INFO] Attempting direct checkpoint loading...")
                     checkpoint = torch.load(ckpt, map_location="cpu")
-                    state_dict = checkpoint.get('state_dict', checkpoint)
-                    
-                    # Try loading with strict=False to see what matches
-                    missing, unexpected = model.load_state_dict(state_dict, strict=False)
-                    print(f"[INFO] Direct load: {len(state_dict) - len(missing)} loaded, {len(missing)} missing, {len(unexpected)} unexpected")
-                    
+                    state_dict = checkpoint.get("state_dict", checkpoint)
+
+                    missing, unexpected = model.load_state_dict(
+                        state_dict, strict=False
+                    )
+                    print(
+                        f"[INFO] Direct load: {len(state_dict) - len(missing)} loaded, {len(missing)} missing, {len(unexpected)} unexpected"
+                    )
+
                     if len(missing) < len(state_dict):
                         print("[SUCCESS] Some weights loaded via direct method")
                     else:
-                        print("[INFO] Proceeding with random initialization for testing...")
+                        print(
+                            "[INFO] Proceeding with random initialization for testing..."
+                        )
                 else:
-                    print(f"[SUCCESS] Loaded {len(loaded_weights)} weight tensors from checkpoint")
+                    print(
+                        f"[SUCCESS] Loaded {len(loadable)} weight tensors from checkpoint"
+                    )
             except Exception as e:
                 print(f"[ERROR] Failed to load checkpoint: {e}")
                 print("[INFO] Proceeding with random initialization for testing...")
@@ -406,8 +420,6 @@ def export_accurate_matchanything_onnx(
         "keypoints1": {0: "num_matches"},
         "mconf": {0: "num_matches"},
     }
-
-    import os
 
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
 
