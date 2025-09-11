@@ -459,17 +459,15 @@ def export_onnx(
 
     # Export with both Python-level and OS-level silencing
     try:
-        with (
-            redirect_stdout(open(os.devnull, "w")),
-            redirect_stderr(open(os.devnull, "w")),
-        ):
-            ctx = (
-                silence_stdio_c(stdout=True, stderr=True)
-                if silence_cpp
-                else contextmanager(lambda: (yield))()
-            )
-            with ctx:
-                torch.onnx.export(model, (x0, x1), str(out_path), **kwargs)
+        with redirect_stdout(open(os.devnull, "w")):
+            with redirect_stderr(open(os.devnull, "w")):
+                ctx = (
+                    silence_stdio_c(stdout=True, stderr=True)
+                    if silence_cpp
+                    else contextmanager(lambda: (yield))()
+                )
+                with ctx:
+                    torch.onnx.export(model, (x0, x1), str(out_path), **kwargs)
     except Exception as e:
         # Make sure the error is visible even if we were silencing
         sys.stdout.flush()
