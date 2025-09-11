@@ -39,7 +39,7 @@ def _pad_to_multiple(x: torch.Tensor, mult: int) -> Tuple[torch.Tensor, int, int
 class AccurateMatchAnythingTRT(nn.Module):
     def __init__(self, amp: bool = False):
         super().__init__()
-        self.encoder = CNNandDinov2TRT(amp=amp)  # has .patch (your enc asserts 16)
+        self.encoder = CNNandDinov2TRT(amp=amp)  # has .patch (your enc asserts 14 for DINOv2)
         self.matcher = GPMatchEncoderTRT(beta=10.0)  # ROMA-style GP matcher
 
     def forward(
