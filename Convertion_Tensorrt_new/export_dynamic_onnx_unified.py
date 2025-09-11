@@ -161,7 +161,7 @@ def resize_positional_embedding(
     return out
 
 
-def load_dinov2_components(
+def load_dinov2_components_func(
     model_state: Dict[str, torch.Tensor],
 ) -> Dict[str, torch.Tensor]:
     """Optional fill-ins from official DINOv2 timm weights."""
@@ -309,7 +309,7 @@ def apply_unified_weight_loading(
 
     # Step 3: optional backfill from official DINOv2
     if load_dinov2_components:
-        back = load_dinov2_components(model_state)
+        back = load_dinov2_components_func(model_state)
         mapped.update(back)
 
     # Step 4: direct matches
@@ -395,12 +395,30 @@ def export_onnx(
 
     # Load weights
     if ckpt and os.path.exists(ckpt):
-        ms = model.state_dict()
-        loadable = apply_unified_weight_loading(ckpt, ms, load_dinov2_components)
-        missing, unexpected = model.load_state_dict(loadable, strict=False)
-        print(
-            f"[LOAD] load_state_dict -> loaded={len(loadable)}, missing={len(missing)}, unexpected={len(unexpected)}"
-        )
+        # Try to use the better weight loader from the old directory first
+        try:
+            import sys
+            from pathlib import Path
+            _THIS_DIR = Path(__file__).resolve().parent
+            _OLD_DIR = _THIS_DIR.parent / "Convertion_Tensorrt"
+            if str(_OLD_DIR) not in sys.path:
+                sys.path.insert(0, str(_OLD_DIR))
+            from unified_weight_loader_fixed import apply_unified_weight_loading as better_loader
+            
+            ms = model.state_dict()
+            loadable = better_loader(ckpt, ms, load_dinov2_components=load_dinov2_components)
+            missing, unexpected = model.load_state_dict(loadable, strict=False)
+            print(
+                f"[LOAD] Better loader -> loaded={len(loadable)}, missing={len(missing)}, unexpected={len(unexpected)}"
+            )
+        except Exception as e:
+            print(f"[LOAD] Better loader failed, falling back: {e}")
+            ms = model.state_dict()
+            loadable = apply_unified_weight_loading(ckpt, ms, load_dinov2_components)
+            missing, unexpected = model.load_state_dict(loadable, strict=False)
+            print(
+                f"[LOAD] Fallback loader -> loaded={len(loadable)}, missing={len(missing)}, unexpected={len(unexpected)}"
+            )
         if missing:
             print("[LOAD] --- Missing keys ---")
             for k in sorted(missing):
@@ -414,6 +432,12 @@ def export_onnx(
             "[LOAD] No checkpoint provided or file missing; continuing with random init (low scores)."
         )
 
+    # Adjust input dimensions to be compatible with patch size (14x14 for DINOv2)
+    patch_size = 14
+    H = ((H + patch_size - 1) // patch_size) * patch_size  # Round up to nearest multiple of 14
+    W = ((W + patch_size - 1) // patch_size) * patch_size
+    print(f"[LOAD] Adjusted input dimensions to {H}x{W} (compatible with patch size {patch_size})")
+    
     # Dummy input
     x0 = torch.rand(1, 3, H, W, device=device)
     x1 = torch.rand(1, 3, H, W, device=device)
