@@ -24,8 +24,13 @@ from Convertion_Tensorrt_new.accurate_matchanything_trt_dyn import (
 def _try_load_weights(model, ckpt_path: str):
     if ckpt_path and os.path.exists(ckpt_path):
         try:
-            # Your full unified loader module name if present in your repo
-            from unified_weight_loader_complete import apply_unified_weight_loading
+            # Import the unified weight loader from the parent directory
+            import sys
+            from pathlib import Path
+            parent_dir = Path(__file__).parent.parent / "Convertion_Tensorrt"
+            if str(parent_dir) not in sys.path:
+                sys.path.insert(0, str(parent_dir))
+            from unified_weight_loader_fixed import apply_unified_weight_loading
 
             model_state = model.state_dict()
             loadable = apply_unified_weight_loading(
