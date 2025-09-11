@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Accurate MatchAnything (ROMA-style) for ONNX/TensorRT (dynamic HxW).
-- Pads inside the graph to the next multiple of encoder.patch (e.g., 16).
+- Pads inside the graph to the next multiple of encoder.patch (e.g., 14).
 - Returns dense fields: warp_c [B,Ha,Wa,2], cert_c [B,Ha,Wa]
 - Also returns: valid_mask [B,Ha,Wa] (1 real, 0 padded), coarse_stride [1] (float)
 - No in-graph thresholding; host filters/top-K.
@@ -51,10 +51,10 @@ class AccurateMatchAnythingTRT(nn.Module):
             warp_c        [B,Ha,Wa,2]  coarse coords (x,y) in img1
             cert_c        [B,Ha,Wa]
             valid_mask    [B,Ha,Wa]    1 for real image area, 0 for padded
-            coarse_stride [1]  (float) encoder patch/stride (e.g., 16.)
+            coarse_stride [1]  (float) encoder patch/stride (e.g., 14.)
         """
         B, C, H, W = image0.shape
-        patch = int(getattr(self.encoder, "patch", 16))
+        patch = int(getattr(self.encoder, "patch", 14))
 
         # RGB->Gray inside graph (ONNX-friendly)
         img0_gray = (
