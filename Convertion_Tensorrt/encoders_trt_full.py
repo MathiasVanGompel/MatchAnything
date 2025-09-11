@@ -115,7 +115,7 @@ class CNNandDinov2TRT(nn.Module):
         self.amp = bool(amp)
         self.use_cls = bool(use_cls_token)
         self.amp_dtype = torch.float16 if amp else torch.float32
-        self.patch = 16
+        self.patch = 14
 
         self.dino = vit_large()  # expects ImageNet-normalized RGB
         _patch_interpolate_pos_encoding(self.dino, patch_size=self.patch)  # <-- fixed here
