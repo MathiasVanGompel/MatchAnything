@@ -281,7 +281,7 @@ def load_missing_dinov2_blocks(
 def apply_unified_weight_loading(
     checkpoint_path: str,
     model_state: Dict[str, torch.Tensor],
-    use_dinov2_backfill: bool = True,
+    load_dinov2_components: bool = True,
 ) -> Dict[str, torch.Tensor]:
     print(f"[LOAD] Reading checkpoint: {checkpoint_path}")
     try:
@@ -308,7 +308,7 @@ def apply_unified_weight_loading(
     mapped = fix_dinov2_block_structure(mapped)
 
     # Step 3: optional backfill from official DINOv2
-    if use_dinov2_backfill:
+    if load_dinov2_components:
         back = load_dinov2_components(model_state)
         mapped.update(back)
 
@@ -320,13 +320,13 @@ def apply_unified_weight_loading(
     print(f"[LOAD] Direct matches: {len(loadable)}")
 
     # Step 5: fill missing blocks
-    if use_dinov2_backfill:
+    if load_dinov2_components:
         add_blocks = load_missing_dinov2_blocks(model_state, loadable)
         loadable.update(add_blocks)
         print(f"[LOAD] After missing-block fill: {len(loadable)}")
 
     # Step 6: final backfill for qkv.bias (paramwise copy by block index)
-    if use_dinov2_backfill and timm is not None:
+    if load_dinov2_components and timm is not None:
         try:
             dinom = timm.create_model(
                 "vit_large_patch14_dinov2.lvd142m", pretrained=True
@@ -381,7 +381,7 @@ def export_onnx(
     ckpt: str = "",
     H: int = 768,
     W: int = 1024,
-    use_dinov2_backfill: bool = True,
+    load_dinov2_components: bool = True,
     verbose_export: bool = False,
     silence_cpp: bool = True,
 ):
@@ -396,7 +396,7 @@ def export_onnx(
     # Load weights
     if ckpt and os.path.exists(ckpt):
         ms = model.state_dict()
-        loadable = apply_unified_weight_loading(ckpt, ms, use_dinov2_backfill)
+        loadable = apply_unified_weight_loading(ckpt, ms, load_dinov2_components)
         missing, unexpected = model.load_state_dict(loadable, strict=False)
         print(
             f"[LOAD] load_state_dict -> loaded={len(loadable)}, missing={len(missing)}, unexpected={len(unexpected)}"
@@ -529,7 +529,7 @@ if __name__ == "__main__":
         ckpt=args.ckpt,
         H=args.H,
         W=args.W,
-        use_dinov2_backfill=not args.no_dinov2_backfill,
+        load_dinov2_components=not args.no_dinov2_backfill,
         verbose_export=args.verbose_export,
         silence_cpp=not args.no_silence_cpp,
     )
