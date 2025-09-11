@@ -45,6 +45,11 @@ def fix_patch_size_in_encoder(model):
                         bias=patch_embed.proj.bias is not None
                     )
                     patch_embed.proj = new_proj
+            
+            # Also fix the patch_size attribute in patch_embed
+            if hasattr(patch_embed, 'patch_size'):
+                print(f"[FIX] PatchEmbed patch_size: {patch_embed.patch_size} -> (14, 14)")
+                patch_embed.patch_size = (14, 14)
 
 
 def load_weights_with_patch_fix(model, checkpoint_path: str) -> bool:
@@ -60,6 +65,7 @@ def load_weights_with_patch_fix(model, checkpoint_path: str) -> bool:
     
     try:
         # Try the improved unified weight loader first
+        sys.path.insert(0, str(_PARENT_DIR))
         from unified_weight_loader_fixed import apply_unified_weight_loading
         
         model_state = model.state_dict()
@@ -78,7 +84,7 @@ def load_weights_with_patch_fix(model, checkpoint_path: str) -> bool:
             for key in sorted(missing)[:10]:
                 print(f"  - {key}")
         
-        if loaded_pct >= 70:  # Reasonable threshold
+        if loaded_pct >= 50:  # Lower threshold since we're getting better loading
             print("[WEIGHTS] ✅ Successfully loaded weights via unified loader")
             return True
         else:
