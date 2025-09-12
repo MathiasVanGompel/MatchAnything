@@ -12,7 +12,11 @@ class GPMatchEncoderTRT(nn.Module):
     @staticmethod
     def _l2norm(x: torch.Tensor, dim: int) -> torch.Tensor:
         eps = 1e-6
-        return x / torch.clamp(torch.norm(x, p=2, dim=dim, keepdim=True), min=eps)
+        # torch.norm exports to ONNX as linalg_vector_norm, which is unsupported
+        # on TensorRT. Compute the L2 norm manually using basic ops that export
+        # cleanly: sqrt(sum(x * x)) instead of torch.norm.
+        norm = torch.sqrt(torch.sum(x * x, dim=dim, keepdim=True))
+        return x / torch.clamp(norm, min=eps)
 
     def forward(self, f0: torch.Tensor, f1: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
