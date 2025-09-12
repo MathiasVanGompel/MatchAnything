@@ -108,14 +108,14 @@ def _patch_interpolate_pos_encoding(dino_module: nn.Module, patch_size: int = 14
 
 class CNNandDinov2TRT(nn.Module):
     """
-    DINOv2 ViT-L/16 (ROMA) -> 'coarse' feature map [B,1024,H/16,W/16]
+    DINOv2 ViT-L/14 (ROMA) -> 'coarse' feature map [B,1024,H/14,W/14]
     """
     def __init__(self, amp: bool = False, use_cls_token: bool = False, out_channels: int = 1024):
         super().__init__()
         self.amp = bool(amp)
         self.use_cls = bool(use_cls_token)
         self.amp_dtype = torch.float16 if amp else torch.float32
-        self.patch = 16
+        self.patch = 14
 
         self.dino = vit_large(patch_size=self.patch)  # expects ImageNet-normalized RGB
         _patch_interpolate_pos_encoding(self.dino, patch_size=self.patch)  # <-- fixed here
