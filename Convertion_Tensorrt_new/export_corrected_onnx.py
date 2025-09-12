@@ -64,18 +64,17 @@ def load_weights_with_patch_fix(model, checkpoint_path: str) -> bool:
     fix_patch_size_in_encoder(model)
     
     try:
-        # Try the improved unified weight loader first
-        sys.path.insert(0, str(_PARENT_DIR))
-        from unified_weight_loader_fixed import apply_unified_weight_loading
+        # Try the improved weight loader first
+        from improved_weight_loader import apply_improved_weight_loading
         
         model_state = model.state_dict()
-        loadable = apply_unified_weight_loading(
-            checkpoint_path, model_state, load_dinov2_components=True
+        loadable = apply_improved_weight_loading(
+            checkpoint_path, model_state, load_dinov2_components=True, verbose=True
         )
         missing, unexpected = model.load_state_dict(loadable, strict=False)
         
         loaded_pct = (len(loadable) / len(model_state)) * 100
-        print(f"[WEIGHTS] Unified loader: {len(loadable)}/{len(model_state)} ({loaded_pct:.1f}%) loaded")
+        print(f"[WEIGHTS] Improved loader: {len(loadable)}/{len(model_state)} ({loaded_pct:.1f}%) loaded")
         print(f"[WEIGHTS] Missing: {len(missing)}, Unexpected: {len(unexpected)}")
         
         # Show some missing keys for debugging
@@ -84,14 +83,59 @@ def load_weights_with_patch_fix(model, checkpoint_path: str) -> bool:
             for key in sorted(missing)[:10]:
                 print(f"  - {key}")
         
-        if loaded_pct >= 50:  # Lower threshold since we're getting better loading
-            print("[WEIGHTS] ✅ Successfully loaded weights via unified loader")
+        if loaded_pct >= 80:  # Higher threshold for improved loader
+            print("[WEIGHTS] ✅ Successfully loaded weights via improved loader")
             return True
         else:
-            print("[WEIGHTS] ⚠️ Low weight loading percentage, trying fallback...")
+            print("[WEIGHTS] ⚠️ Trying fallback unified loader...")
+            
+            # Fallback to original unified loader
+            sys.path.insert(0, str(_PARENT_DIR))
+            from unified_weight_loader_fixed import apply_unified_weight_loading
+            
+            loadable_fallback = apply_unified_weight_loading(
+                checkpoint_path, model_state, load_dinov2_components=True
+            )
+            
+            # Use whichever loader got better results
+            if len(loadable_fallback) > len(loadable):
+                loadable = loadable_fallback
+                missing, unexpected = model.load_state_dict(loadable, strict=False)
+                loaded_pct = (len(loadable) / len(model_state)) * 100
+                print(f"[WEIGHTS] Using fallback loader: {len(loadable)}/{len(model_state)} ({loaded_pct:.1f}%) loaded")
+            
+            if loaded_pct >= 50:
+                print("[WEIGHTS] ✅ Successfully loaded weights")
+                return True
+            else:
+                print("[WEIGHTS] ⚠️ Still low weight loading percentage, trying direct loading...")
             
     except Exception as e:
-        print(f"[WEIGHTS] Unified loader failed: {e}")
+        print(f"[WEIGHTS] Improved loader failed: {e}")
+        print("[WEIGHTS] Trying fallback unified loader...")
+        
+        try:
+            # Fallback to original unified loader
+            sys.path.insert(0, str(_PARENT_DIR))
+            from unified_weight_loader_fixed import apply_unified_weight_loading
+            
+            model_state = model.state_dict()
+            loadable = apply_unified_weight_loading(
+                checkpoint_path, model_state, load_dinov2_components=True
+            )
+            missing, unexpected = model.load_state_dict(loadable, strict=False)
+            
+            loaded_pct = (len(loadable) / len(model_state)) * 100
+            print(f"[WEIGHTS] Fallback loader: {len(loadable)}/{len(model_state)} ({loaded_pct:.1f}%) loaded")
+            
+            if loaded_pct >= 50:
+                print("[WEIGHTS] ✅ Successfully loaded weights via fallback")
+                return True
+            else:
+                print("[WEIGHTS] ⚠️ Low weight loading percentage, trying direct loading...")
+                
+        except Exception as e2:
+            print(f"[WEIGHTS] Fallback loader also failed: {e2}")
     
     try:
         # Fallback to direct loading
