@@ -32,9 +32,10 @@ class GPMatchEncoderTRT(nn.Module):
         sim  = torch.bmm(a, b.transpose(1, 2)) * self.beta   # [B, Na, Nb]
         attn = F.softmax(sim, dim=2)
 
-        ys = torch.arange(Hb, device=f0.device, dtype=f0.dtype)
-        xs = torch.arange(Wb, device=f0.device, dtype=f0.dtype)
-        yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+        ys = torch.arange(Hb, device=f0.device, dtype=f0.dtype).unsqueeze(1)
+        xs = torch.arange(Wb, device=f0.device, dtype=f0.dtype).unsqueeze(0)
+        yy = ys.expand(Hb, Wb)
+        xx = xs.expand(Hb, Wb)
         coords = torch.stack([xx.reshape(-1), yy.reshape(-1)], dim=1)  # [Nb,2]
 
         tgt = torch.bmm(attn, coords.unsqueeze(0).expand(B, -1, -1))  # [B,Na,2]
