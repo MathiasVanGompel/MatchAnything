@@ -432,9 +432,9 @@ def export_onnx(
             "[LOAD] No checkpoint provided or file missing; continuing with random init (low scores)."
         )
 
-    # Adjust input dimensions to be compatible with patch size (14x14 for DINOv2)
-    patch_size = 14
-    H = ((H + patch_size - 1) // patch_size) * patch_size  # Round up to nearest multiple of 14
+    # Adjust input dimensions to be compatible with patch size (16x16 for DINOv2)
+    patch_size = 16
+    H = ((H + patch_size - 1) // patch_size) * patch_size  # Round up to nearest multiple of 16
     W = ((W + patch_size - 1) // patch_size) * patch_size
     print(f"[LOAD] Adjusted input dimensions to {H}x{W} (compatible with patch size {patch_size})")
     
