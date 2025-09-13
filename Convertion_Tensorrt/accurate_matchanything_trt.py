@@ -40,12 +40,14 @@ class AccurateMatchAnythingTRT(nn.Module):
         img_resize: int = 832,
         match_threshold: float = 0.1,
         amp: bool = False,
+        topk: int = 8192,
     ):
         super().__init__()
         self.model_name = model_name
         self.img_resize = img_resize
         self.match_threshold = match_threshold
         self.amp = amp
+        self.topk = topk
 
         if model_name == "matchanything_roma":
             # Use our TensorRT-optimized ROMA implementation
@@ -217,18 +219,9 @@ class AccurateMatchAnythingTRT(nn.Module):
         device = image0.device
         B, C, H, W = image0.shape
 
-        # For ONNX export, use simplified preprocessing
-        # Convert RGB to grayscale (simple average)
-        img0_gray = (
-            0.299 * image0[:, 0:1] + 0.587 * image0[:, 1:2] + 0.114 * image0[:, 2:3]
-        )
-        img1_gray = (
-            0.299 * image1[:, 0:1] + 0.587 * image1[:, 1:2] + 0.114 * image1[:, 2:3]
-        )
-
-        # Get features at coarse level (1/16 resolution for DINOv2)
-        feat0_dict = self.encoder(img0_gray)
-        feat1_dict = self.encoder(img1_gray)
+        # Get features at coarse level (1/14 resolution for DINOv2)
+        feat0_dict = self.encoder(image0)
+        feat1_dict = self.encoder(image1)
 
         feat0_c = feat0_dict["coarse"]  # [B, C, H/16, W/16]
         feat1_c = feat1_dict["coarse"]  # [B, C, H/16, W/16]
@@ -236,40 +229,21 @@ class AccurateMatchAnythingTRT(nn.Module):
         # Coarse matching using our GP matcher
         warp_c, cert_c = self.matcher(feat0_c, feat1_c)  # [B,Ha,Wa,2], [B,Ha,Wa]
 
-        # Apply confidence threshold
-        conf_mask = cert_c > self.match_threshold
-
-        # Extract matches above threshold
         B, Ha, Wa = cert_c.shape
 
-        # Get coordinates of confident matches
-        conf_indices = torch.nonzero(conf_mask, as_tuple=False)  # [N, 3] (batch, y, x)
+        # Fixed-K Top-K selection for TensorRT-friendly outputs
+        K = min(self.topk, Ha * Wa)
+        mconf, flat_idx = cert_c.view(B, -1).topk(k=K, dim=1)
+        y = (flat_idx // Wa).long()
+        x = (flat_idx % Wa).long()
 
-        # Extract match coordinates and confidences. When no matches are found
-        # we return empty tensors that still depend on the network outputs to
-        # keep ONNX export graphs connected to the inputs.
-        if conf_indices.shape[0] == 0:
-            batch_idx = torch.zeros(0, dtype=torch.long, device=device)
-            y_coords = torch.zeros(0, dtype=torch.long, device=device)
-            x_coords = torch.zeros(0, dtype=torch.long, device=device)
-            mkpts0_c = warp_c.view(-1, 2)[0:0]
-            mkpts1_c = warp_c.view(-1, 2)[0:0]
-            mconf = cert_c.view(-1)[0:0]
-        else:
-            batch_idx = conf_indices[:, 0]
-            y_coords = conf_indices[:, 1]
-            x_coords = conf_indices[:, 2]
-            mkpts0_c = torch.stack(
-                [x_coords.float(), y_coords.float()], dim=1
-            )  # [N, 2]
-            mkpts1_c = warp_c[batch_idx, y_coords, x_coords]  # [N, 2]
-            mconf = cert_c[batch_idx, y_coords, x_coords]  # [N]
+        mkpts0_c = torch.stack([x.float(), y.float()], dim=-1)  # [B,K,2]
+        warp_flat = warp_c.view(B, Ha * Wa, 2)
+        gather_idx = flat_idx.unsqueeze(-1).expand(-1, -1, 2)
+        mkpts1_c = torch.gather(warp_flat, 1, gather_idx)  # [B,K,2]
 
         # Convert from coarse coordinates to original image coordinates
-        # Coarse features are at 1/16 resolution due to DINOv2 downsampling
         scale_factor = 16.0
-
-        # Scale to full resolution
         mkpts0_f = mkpts0_c * scale_factor
         mkpts1_f = mkpts1_c * scale_factor
 
@@ -416,9 +390,9 @@ def export_accurate_matchanything_onnx(
     dynamic_axes = {
         "image0": {0: "B", 2: "H", 3: "W"},
         "image1": {0: "B", 2: "H", 3: "W"},
-        "keypoints0": {0: "num_matches"},
-        "keypoints1": {0: "num_matches"},
-        "mconf": {0: "num_matches"},
+        "keypoints0": {0: "B", 1: "K"},
+        "keypoints1": {0: "B", 1: "K"},
+        "mconf": {0: "B", 1: "K"},
     }
 
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
@@ -428,7 +402,8 @@ def export_accurate_matchanything_onnx(
         output_names=["keypoints0", "keypoints1", "mconf"],
         dynamic_axes=dynamic_axes,
         opset_version=17,
-        do_constant_folding=True,
+        do_constant_folding=False,
+        keep_initializers_as_inputs=False,
         verbose=False,
     )
     if "use_external_data_format" in inspect.signature(torch.onnx.export).parameters:
@@ -438,6 +413,8 @@ def export_accurate_matchanything_onnx(
 
     # Consolidate all weights into a single external data file
     model_proto = onnx.load(onnx_path, load_external_data=True)
+    total_params = sum(np.prod(init.dims) for init in model_proto.graph.initializer)
+    print(f"[ONNX] Total parameters serialized: {int(total_params)}")
     external_data_utils.convert_model_to_external_data(
         model_proto,
         all_tensors_to_one_file=True,

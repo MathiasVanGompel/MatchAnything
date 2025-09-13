@@ -259,25 +259,15 @@ class AccurateTensorRTEngine:
         output_shapes = {}
         d_outputs = {}
         h_outputs = {}
-        
+
         for name in self.output_names:
             shape = tuple(self.context.get_tensor_shape(name))
             dtype = trt.nptype(self.engine.get_tensor_dtype(name))
-            
-            # Handle dynamic output shapes
-            if -1 in shape:
-                # For dynamic outputs, we need to allocate max possible size
-                # This is a limitation - in practice you'd need to know the max
-                max_matches = 10000  # Conservative estimate
-                if "keypoints" in name:
-                    shape = (max_matches, 2)
-                elif "mconf" in name:
-                    shape = (max_matches,)
-            
+
             output_shapes[name] = shape
             h_outputs[name] = np.empty(shape, dtype=dtype)
             d_outputs[name] = cuda.mem_alloc(h_outputs[name].nbytes)
-            
+
             self.context.set_tensor_address(name, int(d_outputs[name]))
         
         # Set input addresses
@@ -296,9 +286,13 @@ class AccurateTensorRTEngine:
         # Copy outputs back
         for name in self.output_names:
             cuda.memcpy_dtoh_async(h_outputs[name], d_outputs[name], stream)
-        
+
         stream.synchronize()
-        
+        # Remove batch dimension if present
+        for name in h_outputs:
+            arr = h_outputs[name]
+            if arr.ndim > 1 and arr.shape[0] == 1:
+                h_outputs[name] = arr[0]
         return h_outputs
 
 def main():
