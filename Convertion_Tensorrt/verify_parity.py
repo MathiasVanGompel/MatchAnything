@@ -1,67 +1,35 @@
+# Convertion_Tensorrt/verify_parity.py
 import argparse
-import numpy as np
-import onnxruntime as ort
-import torch
 from pathlib import Path
-from preprocess import preprocess_rgb, unpad_like
+import torch
+import torchvision.transforms.functional as TF
+from PIL import Image
+
+from .accurate_matchanything_trt import AccurateMatchAnythingTRT
 
 @torch.no_grad()
 def run_pytorch(model, img0, img1):
-    device = next(model.parameters()).device
-    img0 = img0.to(device)
-    img1 = img1.to(device)
-    from preprocess import preprocess_rgb, unpad_like
-    img0, pads0 = preprocess_rgb(img0)
-    img1, pads1 = preprocess_rgb(img1)
-    w0, c0 = model(img0, img1)  # (warp, cert)
-    return unpad_like(w0, pads0), unpad_like(c0, pads0)
+    return model(img0, img1)
 
-
-def run_onnx(sess, img0, img1):
-    img0, pads0 = preprocess_rgb(img0)
-    img1, pads1 = preprocess_rgb(img1)
-    outs = sess.run(None, {"image0": img0.cpu().numpy(), "image1": img1.cpu().numpy()})
-    warp, cert = [torch.from_numpy(x) for x in outs]
-    return unpad_like(warp, pads0), unpad_like(cert, pads0)
-
-def mae(a, b):
-    return (a - b).abs().mean().item()
+def load_image(path, device):
+    im = Image.open(path).convert("RGB")
+    t = TF.to_tensor(im).unsqueeze(0)  # [1,3,H,W], float32
+    return t.to(device)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", type=str, default="")
-    ap.add_argument("--onnx", type=str, required=True)
     ap.add_argument("--images", nargs=2, required=True)
+    ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
-    def load_img(p):
-        import cv2
-        im = cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        t = torch.from_numpy(im).permute(2,0,1).unsqueeze(0)
-        return t
+    device = torch.device(args.device)
+    model = AccurateMatchAnythingTRT(amp=False).to(device).eval()
 
-    img0 = load_img(args.images[0])
-    img1 = load_img(args.images[1])
+    img0 = load_image(args.images[0], device)
+    img1 = load_image(args.images[1], device)
 
-    from accurate_matchanything_trt import AccurateMatchAnythingTRT
-    model = AccurateMatchAnythingTRT().eval().cuda() if torch.cuda.is_available() else AccurateMatchAnythingTRT().eval()
-
-    sess = ort.InferenceSession(args.onnx, providers=["CPUExecutionProvider"])
-
-    w_pt, c_pt = run_pytorch(model, img0.clone(), img1.clone())
-    w_ox, c_ox = run_onnx(sess, img0.clone(), img1.clone())
-
-    print("MAE warp:", mae(w_pt, w_ox))
-    print("MAE cert:", mae(c_pt, c_ox))
-
-    H, W = w_pt.shape[-2:]
-    ys = torch.randint(0, H, (512,))
-    xs = torch.randint(0, W, (512,))
-    flow_pt = w_pt[0, :, ys, xs].T
-    flow_ox = w_ox[0, :, ys, xs].T
-    err = (flow_pt - flow_ox).norm(dim=1)
-    print("Pct within 1px:", (err < 1.0).float().mean().item() * 100.0)
+    w_pt, c_pt = run_pytorch(model, img0, img1)
+    print("warp_c:", tuple(w_pt.shape), "cert_c:", tuple(c_pt.shape))
 
 if __name__ == "__main__":
     main()
-

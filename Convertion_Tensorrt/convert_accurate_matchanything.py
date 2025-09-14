@@ -1,112 +1,79 @@
-#!/usr/bin/env python3
-"""Convert MatchAnything model to ONNX with deterministic weight loading."""
+# Convertion_Tensorrt/convert_accurate_matchanything.py
 import argparse
-import os
-import re
-import warnings
 import torch
+import warnings
 from pathlib import Path
 
 from accurate_matchanything_trt import AccurateMatchAnythingTRT, export_accurate_matchanything_onnx
 
-def _strip_prefix(sd, prefix):
-    return {k[len(prefix):]: v for k, v in sd.items() if k.startswith(prefix)}
+def load_matchanything_ckpt_head_only(model: AccurateMatchAnythingTRT, ckpt_path: str) -> None:
+    """
+    Load ONLY matcher/head weights (strip 'matcher.'), leave ROMA DINOv2 backbone to its own official weights.
+    This mirrors the HF Space behavior. See roma/matchanything_roma_model.py::load_state_dict. :contentReference[oaicite:4]{index=4}
+    """
+    if not ckpt_path or not Path(ckpt_path).is_file():
+        warnings.warn(f"[CKPT] Not found or not provided: {ckpt_path}")
+        return
 
-def load_ma_roma_ckpt_strict(model, ckpt_path, backbone_key="encoder.dino", ckpt_backbone_prefix=("matcher.model.encoder.dino", "encoder.dino")):
-    """Load MatchAnything checkpoint strictly for non-backbone parts."""
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    state = ckpt.get("state_dict", ckpt)
-    stripped = {}
-    for p in ckpt_backbone_prefix:
-        stripped.update(_strip_prefix(state, p + "."))
+    msg = torch.load(ckpt_path, map_location="cpu")
+    state = msg.get("state_dict", msg)
 
-    target_sd = model.state_dict()
-    to_load = {}
-    missing_dbg, unexpected_dbg = [], []
-
+    # Strip 'matcher.' prefix as in HF Space
+    cleaned = {}
     for k, v in state.items():
-        kk = k
-        if kk.startswith("matcher.model."):
-            kk = kk[len("matcher.model."):]
-        if kk.startswith(backbone_key + "."):
-            continue
-        if kk in target_sd and target_sd[kk].shape == v.shape:
-            to_load[kk] = v
-        else:
-            if kk not in target_sd:
-                unexpected_dbg.append(kk)
-            else:
-                missing_dbg.append((kk, v.shape, target_sd[kk].shape))
+        if k.startswith("matcher."):
+            cleaned[k.replace("matcher.", "", 1)] = v
 
-    msg = model.load_state_dict(to_load, strict=False)
-    if msg.missing_keys:
-        warnings.warn(f"[CKPT non-backbone] Missing keys: {len(msg.missing_keys)} -> e.g. {msg.missing_keys[:5]}")
-    if msg.unexpected_keys:
-        warnings.warn(f"[CKPT non-backbone] Unexpected keys: {len(msg.unexpected_keys)} -> e.g. {msg.unexpected_keys[:5]}")
-    if missing_dbg:
-        warnings.warn(f"[CKPT non-backbone] Shape mismatches: {len(missing_dbg)}")
-
-def load_official_dinov2_backbone(model, backbone_key="encoder.dino", use_timm_first=True):
-    """Fill the DINOv2 backbone with canonical weights."""
-    off = None
-    if use_timm_first:
-        try:
-            import timm
-            m = timm.create_model("vit_large_patch14_dinov2.lvd142m", pretrained=True, num_classes=0, features_only=False)
-            off = m.state_dict()
-        except Exception:
-            off = None
-    if off is None:
-        dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14')
-        off = dinov2.state_dict()
-
-    tgt_sd = model.state_dict()
-    mapped = {}
-    ok, skip = 0, 0
-    for k, v in off.items():
-        k2 = f"{backbone_key}.{k}"
-        if k2 in tgt_sd and tgt_sd[k2].shape == v.shape:
-            mapped[k2] = v
-            ok += 1
-        else:
-            skip += 1
-
-    msg = model.load_state_dict(mapped, strict=False)
-    if msg.missing_keys or msg.unexpected_keys:
-        warnings.warn(f"[DINOv2 backbone] missing={len(msg.missing_keys)} unexpected={len(msg.unexpected_keys)}")
-    print(f"[DINOv2 backbone] loaded {ok} tensors, skipped {skip} (shape/name mismatch).")
-    return ok
+    # Only apply to gp_head.* (and any auxiliary layers you placed there)
+    head_state = {k.replace("gp_head.", "", 1): v for k, v in cleaned.items() if k.startswith("gp_head.")}
+    missing, unexpected = model.gp_head.load_state_dict(head_state, strict=False)
+    if missing or unexpected:
+        warnings.warn(f"[CKPT head] missing={len(missing)} unexpected={len(unexpected)} (ok if keys differ)")
 
 def main():
-    ap = argparse.ArgumentParser(description="Convert MatchAnything to ONNX")
-    ap.add_argument("--onnx", default="Convertion_Tensorrt/out/accurate_matchanything.onnx", help="Output ONNX path")
+    ap = argparse.ArgumentParser("Accurate MatchAnything -> ONNX")
+    ap.add_argument("--ckpt", type=str, required=False, help="matchanything_roma.ckpt path")
+    ap.add_argument("--onnx", type=str, default="Convertion_Tensorrt/out/accurate_matchanything.onnx")
+    ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--H", type=int, default=840)
     ap.add_argument("--W", type=int, default=840)
-    ap.add_argument("--ckpt", type=str, default=None, help="Path to MatchAnything checkpoint")
     args = ap.parse_args()
 
-    os.makedirs(os.path.dirname(args.onnx) or ".", exist_ok=True)
+    print("=" * 60)
+    print("ACCURATE MATCHANYTHING TO TENSORRT CONVERSION")
+    print("=" * 60)
+    print(f"Checkpoint: {args.ckpt}")
+    print(f"Device: {args.device}")
 
-    model = AccurateMatchAnythingTRT()
+    device = torch.device(args.device)
+    model = AccurateMatchAnythingTRT(amp=True).to(device).eval()
+
+    # Load only head weights from the ckpt (ROMA DINOv2 backbone uses its own official weights)
     if args.ckpt:
-        load_ma_roma_ckpt_strict(model, args.ckpt, backbone_key="encoder.dino")
-    loaded = load_official_dinov2_backbone(model, backbone_key="encoder.dino")
-    assert loaded > 0, "Failed to load any DINOv2 backbone weights"
+        load_matchanything_ckpt_head_only(model, args.ckpt)
 
     onnx_path = export_accurate_matchanything_onnx(model, args.onnx, H=args.H, W=args.W)
-    print(f"[ONNX] Exported accurate model -> {onnx_path}")
-
-    engine_path = args.onnx.replace(".onnx", ".plan")
-    print("\nNext: build TensorRT engine with trtexec:")
+    print("\n============================================================")
+    print("ONNX EXPORT COMPLETE")
+    print("============================================================")
+    print(f"Output: {onnx_path}\n")
+    print("Next: Build TensorRT engine with trtexec:\n")
+    print("Recommended command:")
     print("/usr/src/tensorrt/bin/trtexec \\")
-    print(f"  --onnx={onnx_path} \\")
-    print(f"  --saveEngine={engine_path} \\")
-    print("  --fp16 --memPoolSize=workspace:4096M \\")
-    print(f"  --minShapes=image0:1x3x{args.H//2}x{args.W//2},image1:1x3x{args.H//2}x{args.W//2} \\")
-    print(f"  --optShapes=image0:1x3x{args.H}x{args.W},image1:1x3x{args.H}x{args.W} \\")
-    print(f"  --maxShapes=image0:1x3x{args.H*2}x{args.W*2},image1:1x3x{args.H*2}x{args.W*2} \\")
-    print("  --skipInference --verbose")
+    print(f"    --onnx={onnx_path} \\")
+    print("    --saveEngine=Convertion_Tensorrt/out/accurate_matchanything.plan \\")
+    print("    --fp16 --memPoolSize=workspace:4096M \\")
+    print("    --minShapes=image0:1x3x420x420,image1:1x3x420x420 \\")
+    print("    --optShapes=image0:1x3x840x840,image1:1x3x840x840 \\")
+    print("    --maxShapes=image0:1x3x1680x1680,image1:1x3x1680x1680 \\")
+    print("    --skipInference --verbose")
+    print("\nThen run inference:")
+    print("python Convertion_Tensorrt/run_accurate_matchanything_trt.py \\")
+    print("  --engine Convertion_Tensorrt/out/accurate_matchanything.plan \\")
+    print("  --image0 /path/to/img0.jpg --image1 /path/to/img1.jpg")
+    print("\n============================================================")
+    print("CONVERSION READY")
+    print("============================================================")
 
 if __name__ == "__main__":
     main()
-
