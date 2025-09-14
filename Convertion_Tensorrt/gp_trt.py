@@ -44,8 +44,8 @@ class GPMatchEncoderTRT(nn.Module):
 
         # Weighted average of coords
         tgt = torch.bmm(attn, coords.unsqueeze(0).expand(B, -1, -1))  # [B,Na,2]
-        warp_c = tgt.view(B, Ha, Wa, 2)
-
-        # Confidence = max attn prob
-        cert_c = attn.max(dim=2).values.view(B, Ha, Wa)
+        # channels-first: [B, 2, Hc, Wc] to align with export & runner
+        warp_c = tgt.view(B, Ha, Wa, 2).permute(0, 3, 1, 2).contiguous()
+        # add channel dim: [B, 1, Hc, Wc]
+        cert_c = attn.max(dim=2).values.view(B, 1, Ha, Wa)
         return warp_c, cert_c

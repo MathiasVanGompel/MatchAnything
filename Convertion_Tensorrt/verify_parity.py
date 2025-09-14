@@ -7,10 +7,15 @@ from preprocess import preprocess_rgb, unpad_like
 
 @torch.no_grad()
 def run_pytorch(model, img0, img1):
+    device = next(model.parameters()).device
+    img0 = img0.to(device)
+    img1 = img1.to(device)
+    from preprocess import preprocess_rgb, unpad_like
     img0, pads0 = preprocess_rgb(img0)
     img1, pads1 = preprocess_rgb(img1)
-    w0, c0 = model(img0, img1)
+    w0, c0 = model(img0, img1)  # (warp, cert)
     return unpad_like(w0, pads0), unpad_like(c0, pads0)
+
 
 def run_onnx(sess, img0, img1):
     img0, pads0 = preprocess_rgb(img0)
