@@ -15,6 +15,8 @@ import pycuda.driver as cuda
 from typing import Dict, Tuple, Optional
 import PIL.Image as Image
 
+from preprocess import preprocess_rgb
+
 def load_image_rgb(path: str, target_size: Optional[Tuple[int, int]] = None) -> np.ndarray:
     """Load image as RGB numpy array with improved resizing"""
     if not os.path.exists(path):
@@ -50,20 +52,23 @@ def load_image_rgb(path: str, target_size: Optional[Tuple[int, int]] = None) -> 
     return img
 
 def preprocess_for_tensorrt(img: np.ndarray) -> np.ndarray:
-    """
-    Preprocess image for TensorRT inference.
-    Convert from RGB numpy array to normalized tensor format.
-    """
-    # Convert to float32 and normalize to [0, 1]
+    """Preprocess image for TensorRT inference."""
     img_float = img.astype(np.float32) / 255.0
-    
-    # Convert from HWC to CHW format
     img_chw = np.transpose(img_float, (2, 0, 1))
-    
-    # Add batch dimension
-    img_batch = np.expand_dims(img_chw, axis=0)
-    
-    return img_batch
+    tensor = torch.from_numpy(img_chw).unsqueeze(0)
+    tensor, _ = preprocess_rgb(tensor)
+    return tensor.numpy()
+
+def dense_to_keypoints(warp_c: np.ndarray, cert_c: np.ndarray, scale: int = 14):
+    """Convert dense maps to keypoints and confidences."""
+    warp = warp_c[0]  # [2,Hc,Wc]
+    cert = cert_c[0, 0]  # [Hc,Wc]
+    Hc, Wc = cert.shape
+    ys, xs = np.meshgrid(np.arange(Hc), np.arange(Wc), indexing="ij")
+    mkpts0 = np.stack([xs, ys], axis=-1).reshape(-1, 2) * scale
+    mkpts1 = warp.transpose(1, 2, 0).reshape(-1, 2) * scale
+    mconf = cert.reshape(-1)
+    return mkpts0, mkpts1, mconf
 
 def extract_matches_from_results(keypoints0: np.ndarray, keypoints1: np.ndarray, 
                                 mconf: np.ndarray, confidence_threshold: float = 0.1) -> np.ndarray:
@@ -378,18 +383,16 @@ def main():
     # Run inference
     print("Running TensorRT inference...")
     results = engine.infer(img0_tensor, img1_tensor)
-    
-    # Extract results
-    keypoints0 = results['keypoints0']
-    keypoints1 = results['keypoints1']
-    mconf = results['mconf']
-    
+
+    warp_c = results['warp_c']
+    cert_c = results['cert_c']
+
+    keypoints0, keypoints1, mconf = dense_to_keypoints(warp_c, cert_c)
+
     print(f"Raw results:")
-    print(f"  Keypoints0: {keypoints0.shape}")
-    print(f"  Keypoints1: {keypoints1.shape}")
-    print(f"  Confidences: {mconf.shape}")
-    
-    # Extract high-confidence matches
+    print(f"  Warp map: {warp_c.shape}")
+    print(f"  Cert map: {cert_c.shape}")
+
     matches = extract_matches_from_results(
         keypoints0, keypoints1, mconf, args.confidence_threshold
     )
