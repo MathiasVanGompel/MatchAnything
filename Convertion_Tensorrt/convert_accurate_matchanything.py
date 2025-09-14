@@ -75,13 +75,10 @@ def main():
     print("    --fp16 --memPoolSize=workspace:4096M \\")
     print(
         f"    --minShapes=image0:1x3x{args.H//2}x{args.W//2},image1:1x3x{args.H//2}x{args.W//2} \\")
-    )
     print(
         f"    --optShapes=image0:1x3x{args.H}x{args.W},image1:1x3x{args.H}x{args.W} \\")
-    )
     print(
         f"    --maxShapes=image0:1x3x{args.H*2}x{args.W*2},image1:1x3x{args.H*2}x{args.W*2} \\")
-    )
     print("    --skipInference --verbose")
 
     print("\nThen run inference:")
