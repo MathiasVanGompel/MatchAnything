@@ -8,57 +8,7 @@ import argparse
 import os
 from pathlib import Path
 
-# Optional ONNX graph surgery support
-try:
-    import onnx
-    import onnx_graphsurgeon as gs
-
-    HAS_GS = True
-except Exception:
-    HAS_GS = False
-
 from accurate_matchanything_trt import export_accurate_matchanything_onnx
-
-
-def strip_eyelike_if_present(onnx_in: str, onnx_out: str):
-    """Remove problematic EyeLike operators for TensorRT compatibility"""
-    if not HAS_GS:
-        print("[ONNX-GS] not available; skipping EyeLike rewrite.")
-        return onnx_in
-
-    print("[ONNX-GS] Scanning for EyeLike...")
-    model = onnx.load(onnx_in, load_external_data=True)
-    graph = gs.import_onnx(model)
-    victims = [n for n in graph.nodes if n.op == "EyeLike"]
-    print(f"[ONNX-GS] Found {len(victims)} EyeLike node(s).")
-
-    if not victims:
-        return onnx_in
-
-    # Remove EyeLike nodes
-    for node in victims:
-        node.inputs = []
-        node.outputs = []
-
-    graph.cleanup().toposort()
-    model = gs.export_onnx(graph)
-    external_data_utils = getattr(
-        onnx, "external_data_utils", onnx.external_data_helper
-    )
-    external_data_utils.convert_model_to_external_data(
-        model,
-        all_tensors_to_one_file=True,
-        location=os.path.basename(onnx_out) + ".data",
-        size_threshold=0,
-    )
-    onnx.save_model(model, onnx_out, save_as_external_data=True)
-
-    out_dir = Path(onnx_out).parent
-    for shard in out_dir.glob("onnx__*"):
-        shard.unlink(missing_ok=True)
-
-    print(f"[ONNX-GS] Rewrote EyeLike -> {onnx_out}")
-    return onnx_out
 
 
 def main():
@@ -76,16 +26,13 @@ def main():
         default="matchanything_roma",
         help="Model variant to convert",
     )
-    parser.add_argument("--H", type=int, default=832, help="Input height")
-    parser.add_argument("--W", type=int, default=832, help="Input width")
+    parser.add_argument("--H", type=int, default=840, help="Input height")
+    parser.add_argument("--W", type=int, default=840, help="Input width")
     parser.add_argument(
         "--match_threshold", type=float, default=0.1, help="Match confidence threshold"
     )
     parser.add_argument(
         "--ckpt", type=str, default=None, help="Path to MatchAnything checkpoint"
-    )
-    parser.add_argument(
-        "--no_graph_surgery", action="store_true", help="Skip EyeLike operator removal"
     )
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
 
@@ -112,13 +59,6 @@ def main():
         ckpt=args.ckpt,
     )
 
-    # Step 2: Graph surgery (optional)
-    if not args.no_graph_surgery:
-        try:
-            onnx_path = strip_eyelike_if_present(onnx_path, onnx_path)
-        except Exception as e:
-            print(f"[ONNX-GS] rewrite skipped: {e}")
-
     print("\n" + "=" * 60)
     print("ONNX EXPORT COMPLETE")
     print("=" * 60)
@@ -134,13 +74,13 @@ def main():
     print(f"    --saveEngine={engine_path} \\")
     print("    --fp16 --memPoolSize=workspace:4096M \\")
     print(
-        f"    --minShapes=image0:1x3x{args.H//2}x{args.W//2},image1:1x3x{args.H//2}x{args.W//2} \\"
+        f"    --minShapes=image0:1x3x{args.H//2}x{args.W//2},image1:1x3x{args.H//2}x{args.W//2} \\")
     )
     print(
-        f"    --optShapes=image0:1x3x{args.H}x{args.W},image1:1x3x{args.H}x{args.W} \\"
+        f"    --optShapes=image0:1x3x{args.H}x{args.W},image1:1x3x{args.H}x{args.W} \\")
     )
     print(
-        f"    --maxShapes=image0:1x3x{args.H*2}x{args.W*2},image1:1x3x{args.H*2}x{args.W*2} \\"
+        f"    --maxShapes=image0:1x3x{args.H*2}x{args.W*2},image1:1x3x{args.H*2}x{args.W*2} \\")
     )
     print("    --skipInference --verbose")
 

@@ -85,7 +85,6 @@ def download_matchanything_weights(
         print(f"[WEIGHTS] And save as: {output_path}")
         raise
 
-
 def verify_weights_compatibility(weights_path: str) -> dict:
     """
     Verify that the weights are compatible with the model architecture.
