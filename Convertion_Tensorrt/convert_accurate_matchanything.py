@@ -4,35 +4,34 @@ import torch
 import warnings
 from pathlib import Path
 
-from accurate_matchanything_trt import AccurateMatchAnythingTRT, export_accurate_matchanything_onnx
+# allow running from repo root
+import sys, os
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
 
-def load_matchanything_ckpt_head_only(model: AccurateMatchAnythingTRT, ckpt_path: str) -> None:
-    """
-    Load ONLY matcher/head weights (strip 'matcher.'), leave ROMA DINOv2 backbone to its own official weights.
-    This mirrors the HF Space behavior. See roma/matchanything_roma_model.py::load_state_dict. :contentReference[oaicite:4]{index=4}
-    """
+from accurate_matchanything_trt import AccurateMatchAnythingTRT, export_accurate_matchanything_onnx
+from unified_weight_loader import apply_unified_weight_loading  # <— use your loader
+
+def load_matchanything_ckpt(model: AccurateMatchAnythingTRT, ckpt_path: str) -> None:
     if not ckpt_path or not Path(ckpt_path).is_file():
         warnings.warn(f"[CKPT] Not found or not provided: {ckpt_path}")
         return
 
-    msg = torch.load(ckpt_path, map_location="cpu")
-    state = msg.get("state_dict", msg)
+    # 1) Use unified loader to map checkpoint -> model keys (includes encoder.dino.*)
+    mapped = apply_unified_weight_loading(
+        checkpoint_path=ckpt_path,
+        model_state_dict=model.state_dict(),
+        load_dinov2_components=True,
+    )
 
-    # Strip 'matcher.' prefix as in HF Space
-    cleaned = {}
-    for k, v in state.items():
-        if k.startswith("matcher."):
-            cleaned[k.replace("matcher.", "", 1)] = v
-
-    # Only apply to gp_head.* (and any auxiliary layers you placed there)
-    head_state = {k.replace("gp_head.", "", 1): v for k, v in cleaned.items() if k.startswith("gp_head.")}
-    missing, unexpected = model.gp_head.load_state_dict(head_state, strict=False)
-    if missing or unexpected:
-        warnings.warn(f"[CKPT head] missing={len(missing)} unexpected={len(unexpected)} (ok if keys differ)")
+    # 2) Load what we could map
+    msg = model.load_state_dict(mapped, strict=False)
+    print(f"[LOAD] missing={len(msg.missing_keys)} unexpected={len(msg.unexpected_keys)}")
 
 def main():
     ap = argparse.ArgumentParser("Accurate MatchAnything -> ONNX")
-    ap.add_argument("--ckpt", type=str, required=False, help="matchanything_roma.ckpt path")
+    ap.add_argument("--ckpt", type=str, required=True, help="matchanything_roma.ckpt path")
     ap.add_argument("--onnx", type=str, default="Convertion_Tensorrt/out/accurate_matchanything.onnx")
     ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--H", type=int, default=840)
@@ -48,9 +47,8 @@ def main():
     device = torch.device(args.device)
     model = AccurateMatchAnythingTRT(amp=True).to(device).eval()
 
-    # Load only head weights from the ckpt (ROMA DINOv2 backbone uses its own official weights)
-    if args.ckpt:
-        load_matchanything_ckpt_head_only(model, args.ckpt)
+    # 🔑 Load ROMA backbone + head from the ckpt via your mapper
+    load_matchanything_ckpt(model, args.ckpt)
 
     onnx_path = export_accurate_matchanything_onnx(model, args.onnx, H=args.H, W=args.W)
     print("\n============================================================")
@@ -58,7 +56,6 @@ def main():
     print("============================================================")
     print(f"Output: {onnx_path}\n")
     print("Next: Build TensorRT engine with trtexec:\n")
-    print("Recommended command:")
     print("/usr/src/tensorrt/bin/trtexec \\")
     print(f"    --onnx={onnx_path} \\")
     print("    --saveEngine=Convertion_Tensorrt/out/accurate_matchanything.plan \\")
@@ -71,9 +68,6 @@ def main():
     print("python Convertion_Tensorrt/run_accurate_matchanything_trt.py \\")
     print("  --engine Convertion_Tensorrt/out/accurate_matchanything.plan \\")
     print("  --image0 /path/to/img0.jpg --image1 /path/to/img1.jpg")
-    print("\n============================================================")
-    print("CONVERSION READY")
-    print("============================================================")
 
 if __name__ == "__main__":
     main()

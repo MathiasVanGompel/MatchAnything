@@ -1,11 +1,16 @@
 # Convertion_Tensorrt/verify_parity.py
-import argparse
+import argparse, os, sys
 from pathlib import Path
 import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
 
-from .accurate_matchanything_trt import AccurateMatchAnythingTRT
+# allow running as "python Convertion_Tensorrt/verify_parity.py"
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
+
+from accurate_matchanything_trt import AccurateMatchAnythingTRT
 
 @torch.no_grad()
 def run_pytorch(model, img0, img1):

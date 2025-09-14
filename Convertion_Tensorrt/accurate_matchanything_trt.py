@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from encoders_trt_full import CNNandDinov2TRT
-from gp_trt import GPHeadTRT  # your TRT-friendly GP head that outputs (warp_c, cert_c)
+from gp_trt import GPMatchEncoderTRT as GPHeadTRT  # your TRT-friendly GP head that outputs (warp_c, cert_c)
 
 class AccurateMatchAnythingTRT(nn.Module):
     """
