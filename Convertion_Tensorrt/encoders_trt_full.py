@@ -41,27 +41,22 @@ def _import_vit_large():
 
 # --- DINOv2-L/14 builder (RoMa-compatible) ------------------------------------
 def build_dinov2_vitl14_romacfg(img_size: int = 518) -> nn.Module:
-    """
-    Build the same ViT-L/14 backbone RoMa expects (frozen DINOv2 features).
-    We load official DINOv2 weights (public FB link).
-    """
     vit_large = _import_vit_large()
-    vit_kwargs = dict(
-        img_size=img_size,
+    model = vit_large(
+        img_size=img_size,      # MUST be 518 to match checkpoint (pos_embed length 1370)
         patch_size=14,
         init_values=1.0,
         ffn_layer="mlp",
-        block_chunks=0,  # un-chunked layout / names
+        block_chunks=0,
     )
-    model = vit_large(**vit_kwargs)
     model.eval()
-
-    # Official DINOv2-L/14 pretrain weights
-    url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth"
-    state = torch.hub.load_state_dict_from_url(url, map_location="cpu", check_hash=False)
+    state = torch.hub.load_state_dict_from_url(
+        "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth",
+        map_location="cpu",
+        check_hash=False,
+    )
     missing, unexpected = model.load_state_dict(state, strict=True)
-    if missing or unexpected:
-        raise RuntimeError(f"DINOv2 strict load failed. Missing={missing}, Unexpected={unexpected}")
+    assert not missing and not unexpected, (missing, unexpected)
     return model
 
 
@@ -83,7 +78,7 @@ class DINOv2EncoderTRT(nn.Module):
         self.amp = amp
         self.amp_dtype = amp_dtype
         self.input_hw = input_hw
-        self.dino = build_dinov2_vitl14_romacfg(img_size=max(input_hw))
+        self.dino = build_dinov2_vitl14_romacfg()
         if self.amp:
             self.dino.half()  # align params/biases with FP16 inputs
 
