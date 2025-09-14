@@ -17,6 +17,31 @@ import PIL.Image as Image
 
 from preprocess import preprocess_rgb
 
+def _profile_hw(engine, tensor_name="image0", profile_index=0):
+    """Return (minH, minW, optH, optW, maxH, maxW) for a binding from the plan."""
+    idx = engine.get_binding_index(tensor_name)
+    min_shape, opt_shape, max_shape = engine.get_profile_shape(profile_index, idx)
+    # Shapes are [N,C,H,W]
+    return (min_shape[2], min_shape[3], opt_shape[2], opt_shape[3], max_shape[2], max_shape[3])
+
+def _round_to_multiple(x, k):  # k=14
+    return int(np.clip((x + k//2)//k * k, k, 10**9))
+
+def resize_to_profile(img_rgb: np.ndarray, minH, minW, maxH, maxW, patch=14) -> np.ndarray:
+    """Resize keeping aspect ratio so that H,W are multiples of 'patch' within [min,max]."""
+    H, W = img_rgb.shape[:2]
+    # uniform scale to fit in the max box
+    s = min(maxH / H, maxW / W, 1.0)
+    H1, W1 = int(H * s), int(W * s)
+    # if still below min, upscale
+    s2 = max(minH / max(H1, 1), minW / max(W1, 1), 1.0)
+    H2, W2 = int(H1 * s2), int(W1 * s2)
+    # snap to multiples of 14 inside [min,max]
+    Hf = int(np.clip(_round_to_multiple(H2, patch), minH, maxH))
+    Wf = int(np.clip(_round_to_multiple(W2, patch), minW, maxW))
+    # final resize
+    return cv2.resize(img_rgb, (Wf, Hf), interpolation=cv2.INTER_LINEAR)
+
 def load_image_rgb(path: str) -> np.ndarray:
     """Load image as RGB numpy array"""
     if not os.path.exists(path):
@@ -299,13 +324,22 @@ def main():
     # Load TensorRT engine
     engine = AccurateTensorRTEngine(args.engine)
     
-    # Load and preprocess images
-    print("Loading and preprocessing images...")
+    # Read profile window from the engine
+    minH, minW, optH, optW, maxH, maxW = _profile_hw(engine.engine, "image0", 0)
+    print(f"Profile[0] H: {minH}..{maxH}, W: {minW}..{maxW}")
+
+    # Load raw RGB
     img0_rgb = load_image_rgb(args.image0)
     img1_rgb = load_image_rgb(args.image1)
-    
+
+    # Fit to engine profile (keeps multiples of 14)
+    img0_rgb = resize_to_profile(img0_rgb, minH, minW, maxH, maxW, patch=14)
+    img1_rgb = resize_to_profile(img1_rgb, minH, minW, maxH, maxW, patch=14)
+
+    # Continue with your existing preprocessing
     img0_tensor = preprocess_for_tensorrt(img0_rgb)
     img1_tensor = preprocess_for_tensorrt(img1_rgb)
+
     
     print(f"Image 0 shape: {img0_tensor.shape}")
     print(f"Image 1 shape: {img1_tensor.shape}")
