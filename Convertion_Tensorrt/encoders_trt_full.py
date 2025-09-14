@@ -60,52 +60,6 @@ def _best_factor_pair(n: int) -> Tuple[int, int]:
             return d, n // d
     return n, 1  # fallback (shouldn't happen)
 
-def _patch_interpolate_pos_encoding(dino_module: nn.Module, patch_size: int = 14):
-    """
-    Monkey-patch DINO's interpolate_pos_encoding to be ONNX-safe and to return
-    CLS+PATCH positions (same length as x). Use integer size=(gh,gw) instead of
-    Tensor scale_factors to avoid ONNX export issues with bicubic. :contentReference[oaicite:2]{index=2}
-    """
-    if not hasattr(dino_module, "interpolate_pos_encoding"):
-        return
-
-    pos_embed = dino_module.pos_embed  # [1, 1+N_pre, C]
-    dim = int(pos_embed.shape[-1])
-
-    def safe_interp(x: torch.Tensor, w: torch.Tensor, h: torch.Tensor):
-        """
-        x : [B, 1+N_now, C]  (CLS + PATCH tokens)
-        returns: [B, 1+N_now, C] positional embeddings
-        """
-        B, L, C = x.shape
-        if L <= 1:
-            # degenerate (no patches) -> just return CLS pos
-            return pos_embed[:, :1, :].expand(B, -1, -1)
-
-        # Strip CLS from pretrained PE and reshape to 2D grid
-        pe = pos_embed[:, 1:, :]        # [1, N_pre, C]
-        n_pre = int(pe.shape[1])
-        side_pre = int(round(math.sqrt(max(n_pre, 1))))
-        pe_4d = pe.reshape(1, side_pre, side_pre, dim).permute(0, 3, 1, 2)  # [1, C, Hpre, Wpre]
-
-        # Current patch token count (exclude CLS)
-        N_now = L - 1
-        gh, gw = _best_factor_pair(N_now)
-
-        # ONNX-safe: specify integer output size and avoid bicubic/AA kernel
-        pe_resized = F.interpolate(
-            pe_4d, size=(int(gh), int(gw)), mode="bilinear",
-            align_corners=False, antialias=False
-        )
-        pe_tokens = pe_resized.permute(0, 2, 3, 1).reshape(1, gh * gw, dim)  # [1, N_now, C]
-
-        # Concatenate CLS positional token in front and broadcast over batch
-        cls_tok = pos_embed[:, :1, :]  # [1,1,C]
-        full = torch.cat([cls_tok, pe_tokens], dim=1)  # [1, 1+N_now, C]
-        return full.expand(B, -1, -1)
-
-    dino_module.interpolate_pos_encoding = safe_interp  # type: ignore
-
 class CNNandDinov2TRT(nn.Module):
     """
     DINOv2 ViT-L/14 (ROMA) -> 'coarse' feature map [B,1024,H/14,W/14]
@@ -118,36 +72,62 @@ class CNNandDinov2TRT(nn.Module):
         self.patch = 14
 
         self.dino = vit_large(patch_size=self.patch)  # expects ImageNet-normalized RGB
-        _patch_interpolate_pos_encoding(self.dino, patch_size=self.patch)  # <-- fixed here
+
+        with torch.no_grad():
+            N0 = int(self.dino.pos_embed.shape[1])
+            gh0 = int((N0) ** 0.5)
+            while N0 % gh0 != 0:
+                gh0 -= 1
+            gw0 = N0 // gh0
+            self.register_buffer("_pe_gh0", torch.tensor(gh0, dtype=torch.int64), persistent=False)
+            self.register_buffer("_pe_gw0", torch.tensor(gw0, dtype=torch.int64), persistent=False)
 
         self.proj = nn.Identity()
         if out_channels != 1024:
             self.proj = nn.Conv2d(1024, out_channels, kernel_size=1, bias=False)
 
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        B, C, H, W = x.shape
+    def _resize_pos_embed_dynamic(self, pe: torch.Tensor, x_in: torch.Tensor) -> torch.Tensor:
+        """
+        pe:  [1, N0, C]  (learned PE from pretrain)
+        x_in: [B, 3, H, W]  (current input)
+        Returns PE resized to current patch grid: [1, gh*gw, C]
+        """
+        H = x_in.shape[-2]
+        W = x_in.shape[-1]
+        gh = H // self.patch
+        gw = W // self.patch
 
-        # Defensive: handle accidental grayscale input
+        C = pe.shape[-1]
+        gh0 = int(self._pe_gh0.item())
+        gw0 = int(self._pe_gw0.item())
+        pe_4d = pe.transpose(1, 2).reshape(1, C, gh0, gw0)
+        pe_4d = F.interpolate(pe_4d, size=(gh, gw), mode="bilinear", align_corners=False)
+        return pe_4d.flatten(2).transpose(1, 2)
+
+    def forward(self, x_in: torch.Tensor) -> Dict[str, torch.Tensor]:
+        B, C, H, W = x_in.shape
+
         if C == 1:
-            x = x.repeat(1, 3, 1, 1)
+            x_in = x_in.repeat(1, 3, 1, 1)
 
-        mean = x.new_tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        std = x.new_tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-        x_in = (x - mean) / std
+        mean = x_in.new_tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        std = x_in.new_tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        x = (x_in - mean) / std
         if self.amp:
-            x_in = x_in.to(self.amp_dtype)
+            x = x.to(self.amp_dtype)
 
-        out = self.dino.forward_features(x_in)
-        tokens, cls = _tokens_from_dino(out)  # PATCH tokens (normalized)
+        if hasattr(self.dino, "pos_embed"):
+            self.dino.pos_embed = self._resize_pos_embed_dynamic(self.dino.pos_embed, x_in)
 
-        # Expected coarse grid from the current spatial size
+        out = self.dino.forward_features(x)
+        tokens, cls = _tokens_from_dino(out)
+
         gh, gw = H // self.patch, W // self.patch
         N = tokens.size(1)
         if N != gh * gw:
-            # Fallback if DINO decided a different tokenization internally; trust N
             gh, gw = _best_factor_pair(N)
 
-        feat = tokens.reshape(B, gh, gw, tokens.size(2)).permute(0, 3, 1, 2).contiguous()  # [B,1024,gh,gw]
+        feat = tokens.reshape(B, gh, gw, tokens.size(2)).permute(0, 3, 1, 2).contiguous()
         feat = self.proj(feat)
         outd = {"coarse": feat}
         if self.use_cls and cls is not None:

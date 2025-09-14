@@ -17,39 +17,13 @@ import PIL.Image as Image
 
 from preprocess import preprocess_rgb
 
-def load_image_rgb(path: str, target_size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-    """Load image as RGB numpy array with improved resizing"""
+def load_image_rgb(path: str) -> np.ndarray:
+    """Load image as RGB numpy array"""
     if not os.path.exists(path):
         raise FileNotFoundError(f"Image not found: {path}")
-    
-    # Load with PIL to ensure RGB format
+
     img = Image.open(path).convert('RGB')
-    img = np.array(img)
-    
-    if target_size:
-        # Use high-quality resizing that preserves aspect ratio
-        h, w = img.shape[:2]
-        target_w, target_h = target_size
-        
-        # Calculate scaling factor to maintain aspect ratio
-        scale = min(target_w / w, target_h / h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        
-        # Resize with high quality interpolation
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-        
-        # Pad to target size if needed
-        if new_w != target_w or new_h != target_h:
-            # Create black canvas
-            padded = np.zeros((target_h, target_w, 3), dtype=img.dtype)
-            # Center the image
-            y_offset = (target_h - new_h) // 2
-            x_offset = (target_w - new_w) // 2
-            padded[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = img
-            img = padded
-    
-    return img
+    return np.array(img)
 
 def preprocess_for_tensorrt(img: np.ndarray) -> np.ndarray:
     """Preprocess image for TensorRT inference."""
@@ -221,30 +195,7 @@ class AccurateTensorRTEngine:
         Returns:
             Dictionary with keypoints0, keypoints1, mconf
         """
-        # Ensure images have the same shape for matching
-        if image0.shape != image1.shape:
-            print(f"Warning: Image shapes differ: {image0.shape} vs {image1.shape}")
-            # Resize to common size (use the smaller dimensions to avoid OOM)
-            min_h = min(image0.shape[2], image1.shape[2])
-            min_w = min(image0.shape[3], image1.shape[3])
-            
-            if image0.shape[2] != min_h or image0.shape[3] != min_w:
-                image0 = torch.nn.functional.interpolate(
-                    torch.from_numpy(image0), 
-                    size=(min_h, min_w), 
-                    mode='bilinear', 
-                    align_corners=False
-                ).numpy()
-            
-            if image1.shape[2] != min_h or image1.shape[3] != min_w:
-                image1 = torch.nn.functional.interpolate(
-                    torch.from_numpy(image1), 
-                    size=(min_h, min_w), 
-                    mode='bilinear', 
-                    align_corners=False
-                ).numpy()
-            
-            print(f"Resized images to common shape: {image0.shape}")
+        # Inputs are already padded to multiples of 14; allow different shapes
         
         # Set input shapes if dynamic
         for name in self.input_names:
@@ -330,13 +281,6 @@ def main():
         default=1000,
         help="Maximum matches to show in visualization"
     )
-    parser.add_argument(
-        "--target_size", 
-        type=int, 
-        nargs=2, 
-        default=None,
-        help="Target image size (width height)"
-    )
     
     args = parser.parse_args()
     
@@ -357,22 +301,8 @@ def main():
     
     # Load and preprocess images
     print("Loading and preprocessing images...")
-    engine_size = engine.get_optimal_resolution()
-    if args.target_size:
-        target_size = tuple(args.target_size)
-        if engine_size and target_size != engine_size:
-            print(
-                f"Warning: engine built for {engine_size[0]}x{engine_size[1]} but resizing to {target_size}"
-            )
-    else:
-        target_size = engine_size
-        if target_size:
-            print(f"Using engine target size: {target_size[0]}x{target_size[1]}")
-        else:
-            print("Could not determine engine target size; using original image sizes")
-
-    img0_rgb = load_image_rgb(args.image0, target_size)
-    img1_rgb = load_image_rgb(args.image1, target_size)
+    img0_rgb = load_image_rgb(args.image0)
+    img1_rgb = load_image_rgb(args.image1)
     
     img0_tensor = preprocess_for_tensorrt(img0_rgb)
     img1_tensor = preprocess_for_tensorrt(img1_rgb)
