@@ -124,19 +124,18 @@ class CNNandDinov2TRT(nn.Module):
         if out_channels != 1024:
             self.proj = nn.Conv2d(1024, out_channels, kernel_size=1, bias=False)
 
-    @staticmethod
-    def _normalize_im(x: torch.Tensor) -> torch.Tensor:
-        mean = torch.as_tensor([0.485, 0.456, 0.406], dtype=x.dtype, device=x.device).view(1, 3, 1, 1)
-        std  = torch.as_tensor([0.229, 0.224, 0.225], dtype=x.dtype, device=x.device).view(1, 3, 1, 1)
-        return (x - mean) / std
-
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         B, C, H, W = x.shape
-        if (H % self.patch) != 0 or (W % self.patch) != 0:
-            raise AssertionError(f"H,W must be multiples of {self.patch}, got {H}x{W}")
 
-        x_in = self._normalize_im(x)
-        if self.amp: x_in = x_in.to(self.amp_dtype)
+        # Defensive: handle accidental grayscale input
+        if C == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        mean = x.new_tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        std = x.new_tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        x_in = (x - mean) / std
+        if self.amp:
+            x_in = x_in.to(self.amp_dtype)
 
         out = self.dino.forward_features(x_in)
         tokens, cls = _tokens_from_dino(out)  # PATCH tokens (normalized)
