@@ -314,6 +314,18 @@ def main():
     print("Running TensorRT inference...")
     results = engine.infer(img0_tensor, img1_tensor)
 
+    out_names = set(results.keys())
+    if {"warp_c", "cert_c"} <= out_names:
+        warp_c = results["warp_c"]; cert_c = results["cert_c"]
+    elif {"f0", "f1"} <= out_names:
+        # Encoder-only engine (your current one): save features and exit OR pass to RoMa head
+        np.save(os.path.join(args.output_dir, "f0.npy"), results["f0"])
+        np.save(os.path.join(args.output_dir, "f1.npy"), results["f1"])
+        print("This engine is encoder-only (f0,f1). To get matches/warp, run the RoMa head in PyTorch (see below).")
+        return
+    else:
+        raise RuntimeError(f"Unexpected outputs in engine: {sorted(out_names)}")
+
     warp_c = results['warp_c']
     cert_c = results['cert_c']
 
