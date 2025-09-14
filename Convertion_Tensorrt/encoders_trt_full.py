@@ -1,93 +1,151 @@
-# Convertion_Tensorrt/encoders_trt_full.py
-from typing import Dict, Tuple
+import importlib
+from typing import Dict, Tuple, Optional
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import sys, os
+
+# make top-level package importable no matter where we run from
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-# Use the ROMA DINOv2 implementation that the Space ships with
-# https://huggingface.co/spaces/LittleFrog/MatchAnything/tree/main/imcui/third_party/MatchAnything/third_party/ROMA
-from imcui.third_party.MatchAnything.third_party.ROMA.roma.models.transformer.dinov2 import vit_large as roma_vit_large
 
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD  = (0.229, 0.224, 0.225)
+def _first_present_key(d: dict, keys) -> Optional[torch.Tensor]:
+    """Return the first value in dict d that is not None among keys."""
+    for k in keys:
+        v = d.get(k, None)
+        if v is not None:
+            return v
+    return None
 
-def _to_3ch(x: torch.Tensor) -> torch.Tensor:
-    # x: [B,C,H,W] on (cuda|cpu)
-    if x.shape[1] == 1:
-        return x.repeat(1, 3, 1, 1)
-    return x
-
-def _imagenet_norm(x: torch.Tensor) -> torch.Tensor:
-    mean = x.new_tensor(IMAGENET_MEAN).view(1, 3, 1, 1)
-    std  = x.new_tensor(IMAGENET_STD ).view(1, 3, 1, 1)
-    return (x - mean) / std
-
-def _pad_to_multiple(x: torch.Tensor, mult: int) -> Tuple[torch.Tensor, Tuple[int,int,int,int]]:
-    # Pad H,W up to next multiple of `mult` using ONNX-friendly ops
-    _, _, H, W = x.shape
-    pad_h = (mult - (H % mult)) % mult
-    pad_w = (mult - (W % mult)) % mult
-    if pad_h == 0 and pad_w == 0:
-        return x, (0, 0, 0, 0)
-    # F.pad uses (left, right, top, bottom)
-    x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
-    return x, (0, pad_w, 0, pad_h)
-
-class CNNandDinov2TRT(nn.Module):
+# --- robust import helper -----------------------------------------------------
+def _import_vit_large():
     """
-    ROMA DINOv2 ViT-L/14 backbone that returns a 'coarse' feature map
-    with shape [B, 1024, H/14, W/14], matching ROMA's expectations.
+    Try several likely module paths for RoMa's DINOv2 vit_large builder.
+    Works with your repo layout and common forks.
     """
-    def __init__(self, amp: bool = False, coarse_patch_size: int = 14):
+    candidates = [
+        # your submodule path
+        "imcui.third_party.MatchAnything.third_party.ROMA.roma.models.transformer.dinov2",
+        # some forks rename 'roma' -> 'romatch'
+        "imcui.third_party.MatchAnything.third_party.ROMA.romatch.models.transformer.dinov2",
+        # direct vendor installs
+        "roma.models.transformer.dinov2",
+        "romatch.models.transformer.dinov2",
+    ]
+    last_err = None
+    for m in candidates:
+        try:
+            return importlib.import_module(m).vit_large
+        except Exception as e:
+            last_err = e
+    raise ImportError(f"Could not import RoMa vit_large; tried {candidates}") from last_err
+
+
+# --- DINOv2-L/14 builder (RoMa-compatible) ------------------------------------
+def build_dinov2_vitl14_romacfg(img_size: int = 518) -> nn.Module:
+    """
+    Build the same ViT-L/14 backbone RoMa expects (frozen DINOv2 features).
+    We load official DINOv2 weights (public FB link).
+    """
+    vit_large = _import_vit_large()
+    vit_kwargs = dict(
+        img_size=img_size,
+        patch_size=14,
+        init_values=1.0,
+        ffn_layer="mlp",
+        block_chunks=0,  # un-chunked layout / names
+    )
+    model = vit_large(**vit_kwargs)
+    model.eval()
+
+    # Official DINOv2-L/14 pretrain weights
+    url = "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth"
+    state = torch.hub.load_state_dict_from_url(url, map_location="cpu", check_hash=False)
+    missing, unexpected = model.load_state_dict(state, strict=True)
+    if missing or unexpected:
+        raise RuntimeError(f"DINOv2 strict load failed. Missing={missing}, Unexpected={unexpected}")
+    return model
+
+
+# --- TRT-friendly encoder wrapper ---------------------------------------------
+class DINOv2EncoderTRT(nn.Module):
+    """
+    Wrap DINOv2 so we always keep dtype-consistency and ONNX-traceable control-flow.
+    - amp=False (default): FP32 throughout → safest ONNX export.
+    - amp=True : casts model+inputs to half.
+    Returns {'coarse': [B, 1024, H/14, W/14]} for L/14.
+    """
+    def __init__(
+        self,
+        amp: bool = False,
+        amp_dtype: torch.dtype = torch.float16,
+        input_hw: Tuple[int, int] = (518, 518),
+    ):
         super().__init__()
-        self.amp = bool(amp)
-        self.amp_dtype = torch.float16 if amp else torch.float32
-        self.patch = int(coarse_patch_size)
+        self.amp = amp
+        self.amp_dtype = amp_dtype
+        self.input_hw = input_hw
+        self.dino = build_dinov2_vitl14_romacfg(img_size=max(input_hw))
+        if self.amp:
+            self.dino.half()  # align params/biases with FP16 inputs
 
-        # Instantiate ROMA's DINOv2 ViT-L/14; ROMA handles pos-embed interpolation internally.
-        # These kwargs mirror the ROMA encoders.py instantiation.
-        self.dino = roma_vit_large(
-            patch_size=self.patch,
-            img_size=518,        # matches ROMA config; not baked as a hard limit thanks to interpolate_pos_encoding
-            init_values=1.0,
-            ffn_layer="mlp",
-            block_chunks=0,
-        ).eval()
-
-        # The ROMA DINOv2 weights are loaded by the higher-level model;
-        # this module expects state_dict to be populated before export/infer.
-
-        # No trainable params here for export
-        for p in self.parameters():
-            p.requires_grad_(False)
+        # cache for ONNX-friendly constants
+        self.patch = 14
 
     @torch.no_grad()
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        # x: [B,3,H,W] in float32/float16, device = model device
-        x = _to_3ch(x)
-        x = _imagenet_norm(x)
+        """
+        x: [B, 1|3, H, W] in [0,1]. Ensures 3 channels and correct dtype.
+        Returns: {'coarse': [B, C, H/14, W/14]} with C=1024 for ViT-L/14.
+        """
+        B, C, H, W = x.shape
+
+        # grayscale → 3ch (avoid Python bool branches that annoy ONNX)
+        rep = (C == 1)
+        if rep:
+            x = x.repeat(1, 3, 1, 1)
+
+        # H,W must be multiples of patch size (14)
+        assert H % self.patch == 0 and W % self.patch == 0, "H and W must be multiples of 14."
+        Hc, Wc = H // self.patch, W // self.patch
 
         if self.amp:
-            x = x.to(self.amp_dtype)
+            x = x.to(dtype=self.amp_dtype)
+            with torch.autocast(device_type="cuda", dtype=self.amp_dtype, enabled=True):
+                out = self.dino.forward_features(x)
+        else:
+            x = x.to(dtype=torch.float32)
+            out = self.dino.forward_features(x)
 
-        # ROMA PatchEmbed asserts H,W multiples of patch; do an ONNX-friendly pad if needed
-        x, _ = _pad_to_multiple(x, self.patch)
+        # DINOv2 forward_features returns a dict for RoMa; prefer normalized patch tokens.
+        preferred_keys = [
+            "x_norm_patchtokens",  # RoMa / DINOv2 normalized patch tokens
+            "patch_tokens",
+            "tokens",
+            "last_hidden_state",   # HF/transformers style
+            "x",                   # some forks
+        ]
+        if isinstance(out, dict):
+            seq = _first_present_key(out, preferred_keys)
+        else:
+            seq = out  # some forks return the tensor directly
 
-        # ROMA DINOv2 forward_features returns dict with 'x_norm_patchtokens' [B, N, 1024]
-        out = self.dino.forward_features(x)
-        tokens = out["x_norm_patchtokens"]  # [B, N, 1024]
+        if seq is None:
+            raise RuntimeError(
+                "Unexpected DINOv2 forward_features output format. "
+                f"Available keys: {list(out.keys()) if isinstance(out, dict) else type(out)}"
+            )
 
-        B, N, C = tokens.shape
-        # Recover (Hc, Wc) from token count with known patch size
-        # N = Hc * Wc
-        # We infer Hc, Wc from the padded input spatial size
-        _, _, Hp, Wp = x.shape
-        Hc = Hp // self.patch
-        Wc = Wp // self.patch
+        # ---- Normalize to [B, C, Hc, Wc] without Python shape-conditions ----------
+        if seq.dim() == 3:
+            # seq: [B, N, Ctok]  (may include CLS → N == Hc*Wc + 1)
+            # take the last Hc*Wc tokens; drops CLS if present, no branches.
+            B_, N_, Ctok = seq.shape
+            tokens = seq[:, -(Hc * Wc):, :]
+            fmap = tokens.transpose(1, 2).contiguous().view(B_, Ctok, Hc, Wc)
 
-        # Safety: avoid implicit Python ints during trace
-        tokens = tokens.permute(0, 2, 1).contiguous()           # [B,1024,N]
-        feats16 = tokens.view(B, C, Hc, Wc)                     # [B,1024,H/14,W/14]
+        elif seq.dim() == 4:
+            # already [B, C, Hc, Wc]
+            fmap = seq.contiguous()
+        else:
+            raise RuntimeError(f"Unsupported token tensor shape: {tuple(seq.shape)}")
 
-        return {"coarse": feats16}
+        return {"coarse": fmap}

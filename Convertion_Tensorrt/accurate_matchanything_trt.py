@@ -1,53 +1,53 @@
-# Convertion_Tensorrt/accurate_matchanything_trt.py
-from typing import Tuple
 import torch
 import torch.nn as nn
-
-from encoders_trt_full import CNNandDinov2TRT
-from gp_trt import GPMatchEncoderTRT as GPHeadTRT  # your TRT-friendly GP head that outputs (warp_c, cert_c)
+from typing import Tuple
+from encoders_trt_full import DINOv2EncoderTRT
 
 class AccurateMatchAnythingTRT(nn.Module):
     """
-    Minimal TRT-friendly wrapper:
-      - ROMA DINOv2 encoder (coarse features at 1/14).
-      - Lightweight GP head to predict coarse warp + certainty.
+    Minimal export wrapper that mirrors the "accurate" MatchAnything_roma encoder behavior.
+    It returns the coarse ViT-L/14 features for both input images (stride 14),
+    ready for a downstream matcher (e.g., RoMa's decoder).
     """
-    def __init__(self, amp: bool = False):
+    def __init__(self, input_hw: Tuple[int, int] = (518, 518), amp: bool = False):
         super().__init__()
-        self.encoder = CNNandDinov2TRT(amp=amp)
-        self.gp_head = GPHeadTRT()  # expects two coarse feature maps -> (2,Hc,Wc) & (1,Hc,Wc)
-        self.amp = amp
+        self.encoder = DINOv2EncoderTRT(amp=amp, input_hw=input_hw)
 
     @torch.no_grad()
-    def forward(self, image0: torch.Tensor, image1: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # image0, image1: [1,3,H,W] (dynamic sizes; each padded to ×14 inside encoder)
-        feat0 = self.encoder(image0)["coarse"]   # [1,1024,Hc0,Wc0]
-        feat1 = self.encoder(image1)["coarse"]   # [1,1024,Hc1,Wc1]
+    def forward(self, image0: torch.Tensor, image1: torch.Tensor):
+        """
+        image*: [B, 1|3, H, W] in [0,1], H/W multiples of 14 (e.g., 518).
+        Returns 2 tensors: f0, f1 with shape [B, 1024, H/14, W/14].
+        """
+        f0 = self.encoder(image0)["coarse"]
+        f1 = self.encoder(image1)["coarse"]
+        return f0, f1
 
-        # GP head is written to accept different Hc/Wc per image (no forced common resize)
-        warp_c, cert_c = self.gp_head(feat0, feat1)  # warp [1,2,Hc,Wc], cert [1,1,Hc,Wc]
-        return warp_c, cert_c
 
-
-def export_accurate_matchanything_onnx(model: nn.Module, onnx_path: str, H: int = 840, W: int = 840) -> str:
+def export_accurate_matchanything_onnx(
+    model: AccurateMatchAnythingTRT,
+    onnx_path: str,
+    H: int,
+    W: int,
+    opset: int = 17,
+):
     model.eval()
     device = next(model.parameters()).device
-    dummy0 = torch.randn(1, 3, H, W, device=device)
-    dummy1 = torch.randn(1, 3, H, W, device=device)
+    dummy0 = torch.rand(1, 3, H, W, device=device, dtype=torch.float32)
+    dummy1 = torch.rand(1, 3, H, W, device=device, dtype=torch.float32)
 
     torch.onnx.export(
         model,
         (dummy0, dummy1),
         onnx_path,
+        opset_version=opset,
         input_names=["image0", "image1"],
-        output_names=["warp_c", "cert_c"],
+        output_names=["f0", "f1"],
         dynamic_axes={
-            "image0": {2: "H0", 3: "W0"},
-            "image1": {2: "H1", 3: "W1"},
-            "warp_c": {2: "Hc", 3: "Wc"},
-            "cert_c": {2: "Hc", 3: "Wc"},
+            "image0": {0: "B", 2: "H", 3: "W"},
+            "image1": {0: "B", 2: "H", 3: "W"},
+            "f0": {0: "B"},
+            "f1": {0: "B"},
         },
-        opset_version=17,
-        do_constant_folding=True,
     )
     return onnx_path
