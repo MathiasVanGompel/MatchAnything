@@ -1,51 +1,43 @@
-#!/usr/bin/env python3
-from typing import Tuple
-import torch
-import torch.nn as nn
+import torch, torch.nn as nn
 import torch.nn.functional as F
 
+class L2Norm(nn.Module):
+    def __init__(self, dim=1, eps=1e-6):
+        super().__init__()
+        self.dim, self.eps = dim, eps
+    def forward(self, x):
+        return x / (x.norm(p=2, dim=self.dim, keepdim=True) + self.eps)
+
 class GPMatchEncoderTRT(nn.Module):
-    def __init__(self, beta: float = 10.0):
+    def __init__(self, beta: float = 14.285714285714286):  # 1/0.07
         super().__init__()
         self.beta = float(beta)
+        self.l2 = L2Norm(dim=1, eps=1e-6)
 
-    @staticmethod
-    def _l2norm(x: torch.Tensor, dim: int) -> torch.Tensor:
-        # ONNX-friendly L2 normalization (avoid linalg_vector_norm)
-        eps = 1e-6
-        denom = torch.clamp(torch.sum(x * x, dim=dim, keepdim=True), min=eps * eps).sqrt()
-        return x / denom
-
-    def forward(self, f0: torch.Tensor, f1: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        f0: [B,C,Ha,Wa], f1: [B,C,Hb,Wb]
-        returns:
-          warp_c: [B,Ha,Wa,2] in coarse pixel units of image1
-          cert_c: [B,Ha,Wa]   in [0,1]
-        """
+    @torch.no_grad()
+    def forward(self, f0: torch.Tensor, f1: torch.Tensor):
+        # f*: [B,C,Hc,Wc] -> [B,Na,C] and [B,Nb,C]
         B, C, Ha, Wa = f0.shape
-        _, _, Hb, Wb = f1.shape
+        Hb, Wb = f1.shape[2], f1.shape[3]
+        Na, Nb = Ha * Wa, Hb * Wb
 
-        # [B,Na,C] and [B,Nb,C]
-        a = f0.view(B, C, Ha * Wa).transpose(1, 2)
-        b = f1.view(B, C, Hb * Wb).transpose(1, 2)
-        a = self._l2norm(a, dim=2)
-        b = self._l2norm(b, dim=2)
+        a = self.l2(f0.view(B, C, Na).transpose(1, 2))      # [B,Na,C]
+        b = self.l2(f1.view(B, C, Nb).transpose(1, 2))      # [B,Nb,C]
 
-        # similarity + softmax over Nb (destination pixels)
-        sim  = torch.bmm(a, b.transpose(1, 2)) * self.beta  # [B,Na,Nb]
-        attn = F.softmax(sim, dim=2)
+        # Compute sim in FP32 for stable softmax
+        sim = (a.float() @ b.float().transpose(1, 2))        # [B,Na,Nb]
+        sim = (self.beta * sim).contiguous()
 
-        # Build coords without meshgrid (ONNX-friendly)
-        # xs: [Hb*Wb], ys: [Hb*Wb], coords: [Nb,2]
-        ys = torch.arange(Hb, device=f0.device, dtype=f0.dtype).view(Hb, 1).expand(Hb, Wb).reshape(-1)
-        xs = torch.arange(Wb, device=f0.device, dtype=f0.dtype).view(1, Wb).expand(Hb, Wb).reshape(-1)
-        coords = torch.stack([xs, ys], dim=1)  # [Nb,2], float to match dtype
+        attn = F.softmax(sim, dim=2)                         # FP32 softmax
+        # Build coordinate grid in FP32
+        ys = torch.arange(Hb, device=f0.device, dtype=torch.float32).view(Hb, 1).repeat(1, Wb)
+        xs = torch.arange(Wb, device=f0.device, dtype=torch.float32).view(1, Wb).repeat(Hb, 1)
+        coords = torch.stack([xs.reshape(-1), ys.reshape(-1)], dim=1).unsqueeze(0)  # [1,Nb,2]
+        tgt = attn @ coords                                  # [B,Na,2] in FP32
 
-        # Weighted average of coords
-        tgt = torch.bmm(attn, coords.unsqueeze(0).expand(B, -1, -1))  # [B,Na,2]
-        # channels-first: [B, 2, Hc, Wc] to align with export & runner
-        warp_c = tgt.view(B, Ha, Wa, 2).permute(0, 3, 1, 2).contiguous()
-        # add channel dim: [B, 1, Hc, Wc]
-        cert_c = attn.max(dim=2).values.view(B, 1, Ha, Wa)
-        return warp_c, cert_c
+        warp = tgt.view(B, Ha, Wa, 2).permute(0, 3, 1, 2)    # [B,2,Ha,Wa]
+        cert = attn.max(dim=2)[0].view(B, 1, Ha, Wa)         # [B,1,Ha,Wa]
+
+        # Cast back to original dtype
+        warp = warp.to(f0.dtype); cert = cert.to(f0.dtype)
+        return warp, cert
