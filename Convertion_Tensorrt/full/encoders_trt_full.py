@@ -24,7 +24,7 @@ def _import_vit_large():
     Works with your repo layout and common forks.
     """
     candidates = [
-        # your submodule path (MatchAnything vendored RoMa)
+        # submodule path (MatchAnything vendored RoMa)
         "imcui.third_party.MatchAnything.third_party.ROMA.roma.models.transformer.dinov2",
         # some forks rename 'roma' -> 'romatch'
         "imcui.third_party.MatchAnything.third_party.ROMA.romatch.models.transformer.dinov2",
