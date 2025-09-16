@@ -1,65 +1,71 @@
-#!/usr/bin/env python3
-import numpy as np, tensorrt as trt, pycuda.driver as cuda
-
-
-def _np_dtype_for_trt(dt: trt.DataType):
-    return {
-        trt.DataType.FLOAT: np.float32,
-        trt.DataType.HALF:  np.float16,
-        trt.DataType.INT32: np.int32,
-        trt.DataType.BOOL:  np.bool_,
-    }.get(dt, np.float32)
-
-#!/usr/bin/env python3
-import numpy as np, tensorrt as trt, pycuda.driver as cuda
+# Convertion_Tensorrt/full/trt_engine.py
+from typing import Dict, List
+import numpy as np
+import tensorrt as trt
+import pycuda.driver as cuda
+import pycuda.autoinit  # creates a CUDA context
 
 def _np_dtype_for_trt(dt: trt.DataType):
-    return {
-        trt.DataType.FLOAT: np.float32,
-        trt.DataType.HALF:  np.float16,
-        trt.DataType.INT32: np.int32,
-        trt.DataType.BOOL:  np.bool_,
-    }.get(dt, np.float32)
+    if dt == trt.DataType.FLOAT: return np.float32
+    if dt == trt.DataType.HALF:  return np.float16
+    if dt == trt.DataType.INT32: return np.int32
+    if dt == trt.DataType.BOOL:  return np.bool_
+    return np.float32
 
 class TRTEngine:
-    def __init__(self, plan_path: str, log_level=trt.Logger.INFO):
+    def __init__(self, engine_path: str, log_level: int = trt.Logger.INFO):
         self.logger = trt.Logger(log_level)
-        with open(plan_path, "rb") as f:
+        with open(engine_path, "rb") as f:
             runtime = trt.Runtime(self.logger)
             self.engine = runtime.deserialize_cuda_engine(f.read())
         self.ctx = self.engine.create_execution_context()
-        self.inputs, self.outputs = [], []
+
+        # discover I/O tensors once
+        self.inputs: List[str] = []
+        self.outputs: List[str] = []
         for i in range(self.engine.num_io_tensors):
-            n = self.engine.get_tensor_name(i)
-            if self.engine.get_tensor_mode(n) == trt.TensorIOMode.INPUT:  self.inputs.append(n)
-            else:                                                          self.outputs.append(n)
-        print(f"[TRT] Loaded {plan_path}")
+            name = self.engine.get_tensor_name(i)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self.inputs.append(name)
+            else:
+                self.outputs.append(name)
+
+        print(f"[TRT] Loaded {engine_path}")
         print("  inputs :", self.inputs)
         print("  outputs:", self.outputs)
 
-    def infer(self, feed_dict):
+    # <-- the tiny helper your runner expects
+    def io_tensors(self):
+        return self.inputs, self.outputs
+
+    def infer(self, feed: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         stream = cuda.Stream()
-        d_in, d_out, h_out = {}, {}, {}
+        d_in: Dict[str, cuda.DeviceAllocation] = {}
+        d_out: Dict[str, cuda.DeviceAllocation] = {}
+        h_out: Dict[str, np.ndarray] = {}
 
         try:
-            # Inputs: cast + make contiguous + set shapes/addresses
-            for name, arr in feed_dict.items():
+            # Inputs: cast + contiguous + bind + HtoD
+            for name, arr in feed.items():
                 exp_dt = _np_dtype_for_trt(self.engine.get_tensor_dtype(name))
-                arr = np.ascontiguousarray(arr, dtype=exp_dt)  # <-- fix
+                arr = np.ascontiguousarray(arr, dtype=exp_dt)
                 self.ctx.set_input_shape(name, tuple(arr.shape))
-                d_in[name] = cuda.mem_alloc(arr.nbytes)
-                self.ctx.set_tensor_address(name, int(d_in[name]))
-                cuda.memcpy_htod_async(d_in[name], arr, stream)
+                buf = cuda.mem_alloc(arr.nbytes)
+                d_in[name] = buf
+                self.ctx.set_tensor_address(name, int(buf))
+                cuda.memcpy_htod_async(buf, arr, stream)
 
-            # Outputs: allocate with correct shapes/dtypes
+            # Outputs: allocate with correct shapes/dtypes + bind
             for name in self.outputs:
                 shp = tuple(self.ctx.get_tensor_shape(name))
-                dt = _np_dtype_for_trt(self.engine.get_tensor_dtype(name))
-                h_out[name] = np.empty(shp, dtype=dt, order="C")
-                d_out[name] = cuda.mem_alloc(h_out[name].nbytes)
-                self.ctx.set_tensor_address(name, int(d_out[name]))
+                dt  = _np_dtype_for_trt(self.engine.get_tensor_dtype(name))
+                host = np.empty(shp, dtype=dt, order="C")
+                dev  = cuda.mem_alloc(host.nbytes)
+                h_out[name] = host
+                d_out[name] = dev
+                self.ctx.set_tensor_address(name, int(dev))
 
-            # Run
+            # Run (TensorRT v10 I/O API)
             ok = self.ctx.execute_async_v3(stream.handle)
             if not ok:
                 raise RuntimeError("TensorRT execute_async_v3 failed.")
@@ -71,7 +77,5 @@ class TRTEngine:
             return h_out
 
         finally:
-            # Let PyCUDA free allocations when objects go out of scope;
-            # stream is destroyed here as it leaves scope.
+            # Let PyCUDA free on GC.
             pass
-

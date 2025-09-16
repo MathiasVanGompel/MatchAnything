@@ -1,10 +1,12 @@
+# Convertion_Tensorrt/encoders_trt_full.py
+# -*- coding: utf-8 -*-
 import importlib
 from typing import Dict, Tuple, Optional
 import torch
 import torch.nn as nn
-import sys, os
+import os, sys
 
-# make top-level package importable no matter where we run from
+# Make top-level package importable no matter where we run from
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def _first_present_key(d: dict, keys) -> Optional[torch.Tensor]:
@@ -22,7 +24,7 @@ def _import_vit_large():
     Works with your repo layout and common forks.
     """
     candidates = [
-        # your submodule path
+        # your submodule path (MatchAnything vendored RoMa)
         "imcui.third_party.MatchAnything.third_party.ROMA.roma.models.transformer.dinov2",
         # some forks rename 'roma' -> 'romatch'
         "imcui.third_party.MatchAnything.third_party.ROMA.romatch.models.transformer.dinov2",
@@ -40,23 +42,23 @@ def _import_vit_large():
 
 
 # --- DINOv2-L/14 builder (RoMa-compatible) ------------------------------------
-def build_dinov2_vitl14_romacfg(img_size: int = 518) -> nn.Module:
+def build_dinov2_vitl14_romacfg(img_size: int = 518, block_chunks: int = 0) -> nn.Module:
+    """
+    Build the RoMa DINOv2 ViT-L/14 backbone. We DO NOT load weights here;
+    weights are injected by unified_weight_loader to keep memory low & names consistent.
+    - img_size should be 518 for 37x37 patches + CLS = 1370 tokens in RoMa demos.
+    - block_chunks controls whether blocks are grouped (affects key naming). We default to 0.
+      (Some RoMa/DINOv2 builds use chunking that yields keys like blocks.0.0.*)  # ref: issues show both variants
+    """
     vit_large = _import_vit_large()
     model = vit_large(
-        img_size=img_size,      # MUST be 518 to match checkpoint (pos_embed length 1370)
+        img_size=img_size,
         patch_size=14,
         init_values=1.0,
         ffn_layer="mlp",
-        block_chunks=0,
+        block_chunks=block_chunks,  # 0 = flat (blocks.N.*). Chunked => (blocks.0.N.*)
     )
     model.eval()
-    state = torch.hub.load_state_dict_from_url(
-        "https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth",
-        map_location="cpu",
-        check_hash=False,
-    )
-    missing, unexpected = model.load_state_dict(state, strict=True)
-    assert not missing and not unexpected, (missing, unexpected)
     return model
 
 
@@ -65,25 +67,33 @@ class DINOv2EncoderTRT(nn.Module):
     """
     Wrap DINOv2 so we always keep dtype-consistency and ONNX-traceable control-flow.
     - amp=False (default): FP32 throughout → safest ONNX export.
-    - amp=True : casts model+inputs to half.
-    Returns {'coarse': [B, 1024, H/14, W/14]} for L/14.
+    - amp=True : casts module params + inputs to half.
+
+    Returns {'coarse': [B, 1024, H/14, W/14]} for ViT-L/14.
     """
+
     def __init__(
         self,
         amp: bool = False,
         amp_dtype: torch.dtype = torch.float16,
         input_hw: Tuple[int, int] = (518, 518),
+        block_chunks: int = 0,
     ):
         super().__init__()
         self.amp = amp
         self.amp_dtype = amp_dtype
         self.input_hw = input_hw
-        self.dino = build_dinov2_vitl14_romacfg()
+        self.dino = build_dinov2_vitl14_romacfg(img_size=input_hw[0], block_chunks=block_chunks)
         if self.amp:
             self.dino.half()  # align params/biases with FP16 inputs
 
         # cache for ONNX-friendly constants
         self.patch = 14
+
+    def _cast_input_to_encoder_dtype(self, x: torch.Tensor) -> torch.Tensor:
+        # Cast input to weight dtype (prevents Half/Float mismatch in Conv2d)
+        w = self.dino.patch_embed.proj.weight
+        return x.to(dtype=w.dtype) if x.dtype != w.dtype else x
 
     @torch.no_grad()
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -93,30 +103,25 @@ class DINOv2EncoderTRT(nn.Module):
         """
         B, C, H, W = x.shape
 
-        # grayscale → 3ch (avoid Python bool branches that annoy ONNX)
-        rep = (C == 1)
-        if rep:
+        # grayscale → 3ch (trace-friendly)
+        if C == 1:
             x = x.repeat(1, 3, 1, 1)
 
         # H,W must be multiples of patch size (14)
         assert H % self.patch == 0 and W % self.patch == 0, "H and W must be multiples of 14."
         Hc, Wc = H // self.patch, W // self.patch
 
-        if self.amp:
-            x = x.to(dtype=self.amp_dtype)
-            with torch.autocast(device_type="cuda", dtype=self.amp_dtype, enabled=True):
-                out = self.dino.forward_features(x)
-        else:
-            x = x.to(dtype=torch.float32)
-            out = self.dino.forward_features(x)
+        # enforce dtype to match encoder weights; avoid autocast in ONNX export
+        x = self._cast_input_to_encoder_dtype(x)
+        out = self.dino.forward_features(x)
 
-        # DINOv2 forward_features returns a dict for RoMa; prefer normalized patch tokens.
+        # DINOv2 forward_features returns a dict in RoMa; prefer normalized patch tokens.
         preferred_keys = [
             "x_norm_patchtokens",  # RoMa / DINOv2 normalized patch tokens
             "patch_tokens",
             "tokens",
-            "last_hidden_state",   # HF/transformers style
-            "x",                   # some forks
+            "last_hidden_state",
+            "x",
         ]
         if isinstance(out, dict):
             seq = _first_present_key(out, preferred_keys)
@@ -129,16 +134,13 @@ class DINOv2EncoderTRT(nn.Module):
                 f"Available keys: {list(out.keys()) if isinstance(out, dict) else type(out)}"
             )
 
-        # ---- Normalize to [B, C, Hc, Wc] without Python shape-conditions ----------
+        # reshape to [B,C,Hc,Wc]
         if seq.dim() == 3:
-            # seq: [B, N, Ctok]  (may include CLS → N == Hc*Wc + 1)
-            # take the last Hc*Wc tokens; drops CLS if present, no branches.
+            # seq: [B, N, Ctok] (may include CLS → N == Hc*Wc + 1). Take the last Hc*Wc tokens.
             B_, N_, Ctok = seq.shape
             tokens = seq[:, -(Hc * Wc):, :]
             fmap = tokens.transpose(1, 2).contiguous().view(B_, Ctok, Hc, Wc)
-
         elif seq.dim() == 4:
-            # already [B, C, Hc, Wc]
             fmap = seq.contiguous()
         else:
             raise RuntimeError(f"Unsupported token tensor shape: {tuple(seq.shape)}")
