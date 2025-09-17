@@ -11,17 +11,17 @@ Here
 1. Export ONNX from the RoMa checkpoint (note the 518 resolution):
 
    ```bash
-   python Convertion_Tensorrt/full/convert_full_matchanything_from_ckpt.py \
+   python Conversion_Tensorrt/full/convert_full_matchanything_from_ckpt.py \
      --ckpt imcui/third_party/MatchAnything/weights/matchanything_roma.ckpt \
-     --onnx Convertion_Tensorrt/out/matchanything_full_518.onnx \
+     --onnx Conversion_Tensorrt/out/matchanything_full_518.onnx \
      --H 518 --W 518 --precision fp16 --opset 17
    ```
 2. 
 
   ```bash
   /usr/src/tensorrt/bin/trtexec \ 
-  --onnx=Convertion_Tensorrt/out/matchanything_full_518.onnx \ 
-  --saveEngine=Convertion_Tensorrt/out/matchanything_full_518_fp16.plan \ 
+  --onnx=Conversion_Tensorrt/out/matchanything_full_518.onnx \ 
+  --saveEngine=Conversion_Tensorrt/out/matchanything_full_518_fp16.plan \ 
   --minShapes=image0:1x3x518x518,image1:1x3x518x518 \ 
   --optShapes=image0:1x3x518x518,image1:1x3x518x518 \ 
   --maxShapes=image0:1x3x518x518,image1:1x3x518x518 \ 
@@ -30,8 +30,8 @@ Here
 3. Run inference with the TensorRT engine built from that ONNX graph:
 
    ```bash
-   python Convertion_Tensorrt/full/run_full_matchanything_trt.py \
-     --engine Convertion_Tensorrt/out/matchanything_full_518_fp16.plan \
+   python Conversion_Tensorrt/full/run_full_matchanything_trt.py \
+     --engine Conversion_Tensorrt/out/matchanything_full_518_fp16.plan \
      --image0 tests/data/02928139_3448003521.jpg \
      --image1 tests/data/17295357_9106075285.jpg \
      --opt 518 --conf 0.25 --sample 0.0 --topk 5000 \
@@ -44,7 +44,7 @@ RoMa’s ViT-L/14 backbone expects image sizes that are multiples of the 14-pixe
 
 ### Relationship to the original MatchAnything project
 
-Apart from all the files in Convertion_Tensorrt, there have been made small changes to files to make it ONNX friendly (I do not think all  these changes actually matter anymore as i do not use all these function in conversion, (was for previous prototype) but are included here for information). These changes are in:
+Apart from all the files in Conversion_Tensorrt, there have been made small changes to files to make it ONNX friendly (I do not think all  these changes actually matter anymore as i do not use all these function in conversion, (was for previous prototype) but are included here for information). These changes are in:
 - `imcui/hloc/extract_features.py`
 - `imcui/hloc/match_dense.py`
 - `imcui/hloc/matchers/duster.py`

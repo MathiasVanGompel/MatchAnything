@@ -1,4 +1,4 @@
-# Convertion_Tensorrt/full/ckpt_tools_plus.py
+# Conversion_Tensorrt/full/ckpt_tools_plus.py
 import re
 import torch
 from collections import defaultdict

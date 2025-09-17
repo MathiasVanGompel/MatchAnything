@@ -87,7 +87,7 @@ def main():
     ap.add_argument("--image0", required=True)
     ap.add_argument("--image1", required=True)
     ap.add_argument("--opt", type=int, default=518)
-    ap.add_argument("--outdir", default="Convertion_Tensorrt/out/full_results")
+    ap.add_argument("--outdir", default="Conversion_Tensorrt/out/full_results")
     args = ap.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)

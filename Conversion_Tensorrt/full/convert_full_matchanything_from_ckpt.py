@@ -23,7 +23,7 @@ from unified_weight_loader import apply_unified_weight_loading
 def parse_args():
     ap = argparse.ArgumentParser("Full MatchAnything (encoder+head) → ONNX, with ROMA ckpt remap")
     ap.add_argument("--ckpt", required=True, type=str)
-    ap.add_argument("--onnx", default="Convertion_Tensorrt/out/matchanything_full_518.onnx")
+    ap.add_argument("--onnx", default="Conversion_Tensorrt/out/matchanything_full_518.onnx")
     ap.add_argument("--device", default="cuda", choices=["cuda","cpu"])
     ap.add_argument("--precision", default="fp16", choices=["fp32","fp16"])
     ap.add_argument("--H", type=int, default=518)

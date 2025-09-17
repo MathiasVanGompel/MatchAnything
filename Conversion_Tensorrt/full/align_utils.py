@@ -123,7 +123,7 @@ def main():
     ap.add_argument("--opt", type=int, default=518)
     ap.add_argument("--warp_npy", help="Path to npz with keys warp, cert (from your TRT forward)")
     ap.add_argument("--matches_npz", help="Path to npz with kpts0,kpts1 (and optional inliers)")
-    ap.add_argument("--outdir", default="Convertion_Tensorrt/out/align")
+    ap.add_argument("--outdir", default="Conversion_Tensorrt/out/align")
     args = ap.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)

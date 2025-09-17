@@ -190,7 +190,7 @@ def main():
     ap.add_argument("--rth", type=float, default=2.0)
     ap.add_argument("--viz", choices=["cv2"], default="cv2")
     ap.add_argument("--draw", choices=["lines","dots"], default="lines")
-    ap.add_argument("--outdir", default="Convertion_Tensorrt/out/full_results")
+    ap.add_argument("--outdir", default="Conversion_Tensorrt/out/full_results")
     args = ap.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
