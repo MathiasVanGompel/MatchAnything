@@ -1,5 +1,5 @@
 # ONNX exporter mirroring your original CLI, with a --head flag,
-# and a PYTHONPATH bootstrap so RoMa's package resolves.
+# and a PYTHONPATH bootstrap so RoMa's package resolves + SAME WEIGHT LOADER AS ORIGINAL.
 
 import os, sys
 import argparse
@@ -20,15 +20,8 @@ for p in ROMA_CANDIDATES:
 # --- END: RoMa path bootstrap ---
 
 from full_matchanything_trt_plus import FullMatchAnythingTRTPlus
-from unified_weight_loader_plus import build_mapped_state_dict
-
-def _flatten_state_dict(raw):
-    if isinstance(raw, dict):
-        if "state_dict" in raw and isinstance(raw["state_dict"], dict):
-            return raw["state_dict"]
-        if "model" in raw and isinstance(raw["model"], dict):
-            return raw["model"]
-    return raw
+# ✅ import the SAME loader as your original script
+from unified_weight_loader import apply_unified_weight_loading
 
 def main():
     ap = argparse.ArgumentParser()
@@ -53,17 +46,23 @@ def main():
         upsample_res=(args.H, args.W)
     ).to(device).eval()
 
-    # Only try ckpt mapping for decoder paths. GP uses your baseline init anyway.
-    if args.head != "gp" and os.path.isfile(args.ckpt):
-        raw = torch.load(args.ckpt, map_location="cpu")
-        ckpt = _flatten_state_dict(raw)
-        mapped = build_mapped_state_dict(ckpt, model.state_dict())
-        missing, unexpected = model.load_state_dict(mapped, strict=False)
-        print(f"[loader] loaded: {len(mapped)} tensors | missing: {len(missing)} | unexpected: {len(unexpected)}")
-    elif args.head != "gp":
-        print(f"[warn] ckpt not found at {args.ckpt} — exporting with current weights.")
+    # --- Load weights like the original converter (encoder + gp fully mapped) ---
+    if os.path.isfile(args.ckpt):
+        model_state = model.state_dict()
+        # Let your loader do all the mapping + TIMM supplementation
+        loadable = apply_unified_weight_loading(args.ckpt, model_state, load_dinov2_components=True)
+        # Keep only entries that exist in the model and match shapes
+        filtered = {k: v for k, v in loadable.items()
+                    if k in model_state and tuple(v.shape) == tuple(model_state[k].shape)}
+        model_state.update(filtered)
+        missing_keys = [k for k in model.state_dict().keys() if k not in filtered]
+        model.load_state_dict(model_state, strict=False)
+        # Pretty print summary (like your original)
+        total = len(model.state_dict())
+        print(f"[loader] loaded: {len(filtered)} / {total} tensors "
+              f"({(len(filtered)/max(total,1))*100:.1f}%) | missing: {len(missing_keys)}")
     else:
-        print("[info] head='gp': skipping external ckpt load (not needed).")
+        print(f"[warn] ckpt not found at {args.ckpt} — exporting with current weights.")
 
     if amp:
         model.half()

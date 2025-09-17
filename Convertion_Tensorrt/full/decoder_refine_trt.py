@@ -58,9 +58,17 @@ class CrossAttention(nn.Module):
         v = v.view(B, Nb, H, -1).transpose(1, 2)   # [B,H,Nb,hd]
         attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,H,Na,Nb]
         attn = self.softmax(attn)                                  # **fp32**
-        out = torch.matmul(attn, v.float())                        # promote v -> fp32 for matmul
-        out = out.transpose(1, 2).contiguous().view(B, Na, -1)     # [B,Na,H*hd]
-        return self.to_out(out), attn  # to_out runs fine with fp32
+
+        # compute output in fp32 for stability
+        out = torch.matmul(attn, v.float())                        # -> [B,H,Na,hd] (fp32)
+        out = out.transpose(1, 2).contiguous().view(B, Na, -1)     # [B,Na,H*hd] (fp32)
+
+        # IMPORTANT: match Linear weight dtype to avoid Float/Half mismatch
+        w_dtype = self.to_out.weight.dtype
+        if out.dtype != w_dtype:
+            out = out.to(w_dtype)
+
+        return self.to_out(out), attn  # attn stays fp32
 
 class DecoderLayer(nn.Module):
     def __init__(self, dim: int, heads: int = 8, head_dim: int = 64, ff_mult: int = 4):
@@ -107,13 +115,13 @@ class MatchDecoderTRT(nn.Module):
 
         warp = tgt.view(B, Ha * Wa, 2).transpose(1, 2).view(B, 2, Ha, Wa)
         cert = attn.max(dim=2)[0].view(B, 1, Ha, Wa)
-        # cast OUTS back to fp16 if encoder ran in fp16
+        # cast OUTS back to encoder dtype (fp16 when AMP)
         return warp.to(fA.dtype), cert.to(fA.dtype)
 
 class RefineCNNTRT(nn.Module):
     """
     Tiny refinement CNN. Consumes (warp, certainty[, aux]) and predicts residual flow.
-    ONNX/TRT-friendly; not a RoMa replica but aligned with coarse-to-fine idea.
+    Trying to make ONNX/TRT-friendly; not yet a RoMa replica but aligned with coarse-to-fine idea.
     """
     def __init__(self, in_ch: int = 3, hidden: int = 64, iters: int = 1):
         super().__init__()

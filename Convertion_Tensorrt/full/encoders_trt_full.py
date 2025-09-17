@@ -44,7 +44,7 @@ def _import_vit_large():
 # --- DINOv2-L/14 builder (RoMa-compatible) ------------------------------------
 def build_dinov2_vitl14_romacfg(img_size: int = 518, block_chunks: int = 0) -> nn.Module:
     """
-    Build the RoMa DINOv2 ViT-L/14 backbone. We DO NOT load weights here;
+    Build the RoMa DINOv2 ViT-L/14 backbone.
     weights are injected by unified_weight_loader to keep memory low & names consistent.
     - img_size should be 518 for 37x37 patches + CLS = 1370 tokens in RoMa demos.
     - block_chunks controls whether blocks are grouped (affects key naming). We default to 0.
