@@ -3,10 +3,12 @@
 ## Directory layout
 
 - `full/` contains the working TensorRT prototype. It focuses on the encoder + GP head path and successfully loads 342 of the remapped weights while the pretrained checkpoint exposes 603 keys. The unified loader handles the gap by skipping mismatched tensors and reporting what is missing.
-- `plus/` is an experimental playground that wires in decoder and refinement heads. These scripts do not yet restore the weights correctly, so the exported networks are placeholders for future research rather than ready-to-run models.
-- `requirements_improved.txt` lists optional Python packages that make the conversion workflow smoother.
+- `plus/` is an newer version that wires in decoder and refinement heads. These scripts do not yet restore the weights correctly, so this is just to give an idea on how to advance the TRT engine.
+- `EloFTR/` is an older version that translates the EloFTr into TensorRT. I have not touched this in a while, but normally everything still works. This gave quite good results from early on and gave way less errors for ONNX export than RoMa.
+- `requirements_improved.txt` lists packages.
 
 ## Typical workflow
+Here is an example of how the engine is loaded and how images are runned through the engine (for files in `full/`).
 1. Export ONNX from the RoMa checkpoint (note the 518 resolution):
 
    ```bash
@@ -38,7 +40,6 @@
    ```
 
 ### Why 518?
-
 RoMa’s ViT-L/14 backbone expects image sizes that are multiples of the 14-pixel patch size. A resolution of 518 pixels corresponds to 37 patches on each axis (37 × 14 = 518), yielding the 37 × 37 + CLS token layout that the pretrained RoMa checkpoint was tuned for. On stronger GPU, this can be changed to have a bigger resolution, but it needs to be a multiple of 14.
 
 ### Relationship to the original MatchAnything project

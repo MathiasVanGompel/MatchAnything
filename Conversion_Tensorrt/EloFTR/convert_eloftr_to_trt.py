@@ -58,8 +58,8 @@ def load_eloftr_model(
 ):
     """Load the vendorised E-LoFTR checkpoint and wrap it for ONNX export."""
 
-    from src.loftr import LoFTR
-    from src.utils.misc import lower_config
+    from imcui.third_party.MatchAnything.src.loftr import LoFTR
+    from imcui.third_party.MatchAnything.src.utils.misc import lower_config
 
     spec = importlib_util.spec_from_file_location("eloftr_cfg", str(CONF_DIR / "eloftr_model.py"))
     eloftr_cfg = importlib_util.module_from_spec(spec)
