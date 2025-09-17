@@ -1,5 +1,4 @@
-# Additional requirements for improved TensorRT conversion
-# Add these to your existing requirements.txt
+# Additional requirements for TensorRT conversion
 
 # For downloading weights from Google Drive
 gdown>=4.6.0
