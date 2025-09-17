@@ -1,74 +1,104 @@
-import os, sys, pathlib, json
-import torch
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""E-LoFTR → ONNX → TensorRT conversion utilities."""
+
+import os
+import pathlib
+import sys
+from importlib import util as importlib_util
+from typing import Union
+
 import numpy as np
+import torch
 
-# ---- Adjust these if needed
-REPO_ROOT = pathlib.Path("/home/mathias/MatchAnything-1")
-MA_THIRD = REPO_ROOT / "imcui" / "third_party" / "MatchAnything"
-SRC_DIR  = MA_THIRD / "src"
-CONF_DIR = MA_THIRD / "configs" / "models"
-WEIGHTS_ELOFTR = MA_THIRD / "weights" / "matchanything_eloftr.ckpt"
 
-# Make the project importable as 'src'
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-if str(MA_THIRD) not in sys.path:
-    sys.path.insert(0, str(MA_THIRD))
+THIS_DIR = pathlib.Path(__file__).resolve().parent
+REPO_ROOT = THIS_DIR.parent.parent
+
+env_override = os.environ.get("MATCHANYTHING_DIR")
+candidate_roots = []
+if env_override:
+    candidate_roots.append(pathlib.Path(env_override))
+candidate_roots.extend(
+    [
+        REPO_ROOT / "imcui" / "third_party" / "MatchAnything",
+        REPO_ROOT / "third_party" / "MatchAnything",
+    ]
+)
+
+MATCHANYTHING_ROOT = None
+for root in candidate_roots:
+    if root.is_dir():
+        MATCHANYTHING_ROOT = root
+        break
+
+if MATCHANYTHING_ROOT is None:
+    raise FileNotFoundError(
+        "Could not locate the vendorised MatchAnything checkout. Set MATCHANYTHING_DIR "
+        "or place it under imcui/third_party/MatchAnything."
+    )
+
+SRC_DIR = MATCHANYTHING_ROOT / "src"
+CONF_DIR = MATCHANYTHING_ROOT / "configs" / "models"
+WEIGHTS_ELOFTR = MATCHANYTHING_ROOT / "weights" / "matchanything_eloftr.ckpt"
+
+for path in (MATCHANYTHING_ROOT, SRC_DIR):
+    if path.is_dir():
+        resolved = str(path)
+        if resolved not in sys.path:
+            sys.path.append(resolved)
 
 # -------------------------
 # 1) Load E-LoFTR + weights
 # -------------------------
-def load_eloftr_model(device="cuda", ckpt_path=str(WEIGHTS_ELOFTR), eval_mode=True):
-    """
-    Returns: (exportable_module, cfg_dict)
-      - exportable_module is a torch.nn.Module expecting (image0, image1) as inputs.
-      - cfg_dict is the lowered config (dict) used to build the model.
-    """
-    # Import here after sys.path was set
+def load_eloftr_model(
+    device: str = "cuda",
+    ckpt_path: Union[str, os.PathLike] = WEIGHTS_ELOFTR,
+    eval_mode: bool = True,
+):
+    """Load the vendorised E-LoFTR checkpoint and wrap it for ONNX export."""
+
     from src.loftr import LoFTR
     from src.utils.misc import lower_config
-    from importlib import util as importlib_util
 
-    # Import the config file (exec its side-effects to fill cfg)
     spec = importlib_util.spec_from_file_location("eloftr_cfg", str(CONF_DIR / "eloftr_model.py"))
     eloftr_cfg = importlib_util.module_from_spec(spec)
-    spec.loader.exec_module(eloftr_cfg)   # defines cfg
+    spec.loader.exec_module(eloftr_cfg)  # defines cfg
 
-    # Convert YACS cfg to a plain dict with lower-case keys the model expects
     cfg = lower_config(eloftr_cfg.cfg)
     loftr_cfg = cfg["loftr"]
 
-    # This model expects 'npe' = [trainH, trainW, testH, testW].
-    # Use a sensible default (480x640), which aligns with common LoFTR/E-LoFTR setups.
     coarse = loftr_cfg.setdefault("coarse", {})
     if coarse.get("npe") is None:
-        H, W = 480, 640
-        coarse["npe"] = [H, W, H, W]
-    # Build model
+        height, width = 480, 640
+        coarse["npe"] = [height, width, height, width]
+
     model = LoFTR(config=loftr_cfg)
 
-    # Load PL checkpoint state dict (keys may be prefixed with 'matcher.')
+    ckpt_path = pathlib.Path(ckpt_path)
     state = torch.load(ckpt_path, map_location="cpu")["state_dict"]
     model.load_state_dict(state, strict=False)
 
     if eval_mode:
         model.eval()
 
-    # Wrap to accept (image0, image1) tensors directly and return (mkpts0, mkpts1, mconf)
     class LoFTRExportWrapper(torch.nn.Module):
-        def __init__(self, core):
+        """Adapter that exposes a signature matching the ONNX exporter expectations."""
+
+        def __init__(self, core: torch.nn.Module):
             super().__init__()
-            self.m = core
+            self.core = core
 
         @torch.no_grad()
         def forward(self, image0, image1):
             data = {"image0": image0, "image1": image1}
-            out = self.m(data)
-            # Prefer fine-level outputs if present; fall back to coarse
+            out = self.core(data)
             mkpts0 = out.get("mkpts0_f", out.get("mkpts0_c"))
             mkpts1 = out.get("mkpts1_f", out.get("mkpts1_c"))
-            mconf  = out.get("mconf", out.get("m_b_conf", None))
-            return mkpts0, mkpts1, mconf if mconf is not None else torch.empty(0, device=image0.device)
+            mconf = out.get("mconf", out.get("m_b_conf", None))
+            if mconf is None:
+                mconf = torch.empty(0, device=image0.device)
+            return mkpts0, mkpts1, mconf
 
     wrapper = LoFTRExportWrapper(model).to(device)
     return wrapper, loftr_cfg
@@ -76,11 +106,9 @@ def load_eloftr_model(device="cuda", ckpt_path=str(WEIGHTS_ELOFTR), eval_mode=Tr
 # --------------------------------------
 # 2) Export ONNX with dynamic dimensions
 # --------------------------------------
-# Convertion_Tensorrt/convert_eloftr_to_trt.py
-
 def export_eloftr_onnx(model, onnx_path, opset=17, sample_hw=(480, 640)):
-    import torch
-    model.eval().to("cuda")   # 'model' is the wrapper that takes (image0, image1)
+    """Export the wrapped E-LoFTR module to ONNX with dynamic shapes."""
+    model.eval().to("cuda")  # 'model' is the wrapper that takes (image0, image1)
     H, W = sample_hw
     image0 = torch.randn(1, 1, H, W, device="cuda")
     image1 = torch.randn(1, 1, H, W, device="cuda")
@@ -127,12 +155,12 @@ def export_eloftr_onnx(model, onnx_path, opset=17, sample_hw=(480, 640)):
 # -------------------------------------------------
 # 3) Build a TensorRT engine from an ONNX file (FP16)
 # -------------------------------------------------
-import os
 import tensorrt as trt
 
+
 def build_trt_engine_from_onnx(
-    onnx_path: str,
-    engine_path: str,
+    onnx_path: Union[str, os.PathLike],
+    engine_path: Union[str, os.PathLike],
     min_hw=(240, 320),
     opt_hw=(320, 480),
     max_hw=(480, 640),
@@ -141,9 +169,10 @@ def build_trt_engine_from_onnx(
     builder_optimization_level=1,
     static_hw=(320, 480),      # static fallback (H, W)
 ):
-    """
-    Build a TensorRT 10 engine from an ONNX file with memory-friendly settings.
-    """
+    """Build a TensorRT 10 engine from an ONNX file with memory-friendly settings."""
+
+    onnx_path = os.fspath(onnx_path)
+    engine_path = os.fspath(engine_path)
 
     logger = trt.Logger(trt.Logger.WARNING)
     trt.init_libnvinfer_plugins(logger, namespace="")
