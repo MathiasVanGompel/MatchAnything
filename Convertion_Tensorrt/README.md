@@ -7,7 +7,7 @@
 - `requirements_improved.txt` lists optional Python packages that make the conversion workflow smoother.
 
 ## Typical workflow
-
+Here 
 1. Export ONNX from the RoMa checkpoint (note the 518 resolution):
 
    ```bash
@@ -16,8 +16,18 @@
      --onnx Convertion_Tensorrt/out/matchanything_full_518.onnx \
      --H 518 --W 518 --precision fp16 --opset 17
    ```
+2. 
 
-2. Run inference with the TensorRT engine built from that ONNX graph:
+  ```bash
+  /usr/src/tensorrt/bin/trtexec \ 
+  --onnx=Convertion_Tensorrt/out/matchanything_full_518.onnx \ 
+  --saveEngine=Convertion_Tensorrt/out/matchanything_full_518_fp16.plan \ 
+  --minShapes=image0:1x3x518x518,image1:1x3x518x518 \ 
+  --optShapes=image0:1x3x518x518,image1:1x3x518x518 \ 
+  --maxShapes=image0:1x3x518x518,image1:1x3x518x518 \ 
+  --fp16 --builderOptimizationLevel=3 --memPoolSize=workspace:1024
+  ```
+3. Run inference with the TensorRT engine built from that ONNX graph:
 
    ```bash
    python Convertion_Tensorrt/full/run_full_matchanything_trt.py \
@@ -30,14 +40,25 @@
 
 ### Why 518?
 
-RoMa’s ViT-L/14 backbone expects image sizes that are multiples of the 14-pixel patch size. A resolution of 518 pixels corresponds to 37 patches on each axis (37 × 14 = 518), yielding the 37 × 37 + CLS token layout that the pretrained RoMa checkpoint was tuned for. Sticking to 518 keeps positional embeddings aligned and prevents costly resizing of attention tokens during export.
+RoMa’s ViT-L/14 backbone expects image sizes that are multiples of the 14-pixel patch size. A resolution of 518 pixels corresponds to 37 patches on each axis (37 × 14 = 518), yielding the 37 × 37 + CLS token layout that the pretrained RoMa checkpoint was tuned for. On stronger GPU, this can be changed to have a bigger resolution, but it needs to be a multiple of 14.
 
-### Relationship to the upstream MatchAnything project
+### Relationship to the original MatchAnything project
 
-This fork diverges from the Hugging Face Space (`LittleFrog/MatchAnything`) and the main branch by patching files deep inside `MatchAnything/imcui/…`. The vendorized RoMa code and weight loading utilities under `imcui/third_party/MatchAnything` were expanded to remap checkpoints, resize positional embeddings, and back-fill missing DINOv2 parameters from TIMM. Those changes eliminate the namespace mismatches that otherwise block TensorRT export.
+Apart from all the files in Convertion_Tensorrt, there have been made small changes to files to make it ONNX friendly (I do not think all  these changes actually matter anymore as i do not use all these function in conversion, (was for previous prototype) but are included here for information). These changes are in:
+- `imcui/hloc/extract_features.py`
+- `imcui/hloc/match_dense.py`
+- `imcui/hloc/matchers/duster.py`
+- `imcui/third_party/MatchAnything/src/loftr/utils/geometry.py`
+- `imcui/third_party/MatchAnything/src/utils/dataset.py`
+- `imcui/third_party/MatchAnything/third_party/ROMA/roma/models/croco/pos_embed.py`
+- `imcui/third_party/MatchAnything/third_party/ROMA/roma/models/dust3r/utils/geometry.py`
+- `imcui/third_party/MatchAnything/third_party/ROMA/roma/models/dust3r/utils/image.py`
+- `imcui/third_party/MatchAnything/third_party/ROMA/roma/models/matcher.py`
+- `imcui/third_party/MatchAnything/third_party/ROMA/roma/models/transformer/dinov2.py`
+- `imcui/third_party/MatchAnything/third_party/ROMA/roma/utils/utils.py`
 
 ## Current status
 
-- The `full/` pipeline is the reliable path for producing TensorRT engines today.
+- The `full/` pipeline is the reliable path for producing TensorRT engines.
 - The `plus/` directory captures aspirational work to integrate the RoMa decoder and refinement stages; once the weight mapping issues are solved it will be ready for experimentation.
-- Keep an eye on loader logs: they document how many of the 342 usable weights were restored relative to the 603 keys shipped in the checkpoint and flag any further drift from upstream training code.
+- Keep an eye on loader logs: they document how many of the 342 usable weights were restored relative to the 603 keys shipped in the checkpoint and flag any further drift from upstream training code. In the `plus/` directory I tried to load more of the checkpoints, but it does not work yet.
