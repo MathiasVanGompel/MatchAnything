@@ -1,12 +1,11 @@
-# full_matchanything_trt_plus.py
-# Wrapper that reuses your DINOv2 encoder + GP head,
-# and adds a RoMa-style decoder and optional refinement.
+# Extended TensorRT wrapper that reuses the DINOv2 encoder and GP head
+# It also adds a RoMa-style decoder alongside an optional refinement module.
 from typing import Optional, Tuple, Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# import your existing encoder and GP head
+# Import the existing encoder and GP head.
 try:
     from encoders_trt_full import DINOv2EncoderTRT
 except Exception as e:
@@ -16,7 +15,7 @@ except Exception as e:
     )
 
 try:
-    from gp_trt import GPMatchEncoderTRT  # your current GP head
+    from gp_trt import GPMatchEncoderTRT  # Existing GP head reused here.
 except Exception as e:
     raise ImportError(
         "GPMatchEncoderTRT not found. Keep this file next to your existing code. "
@@ -35,7 +34,7 @@ def _as_tensor_feat(x):
     if isinstance(x, torch.Tensor):
         return x
     if isinstance(x, dict):
-        # common names seen in matching backbones
+        # Common names seen in matching backbones.
         for k in ("feat", "features", "feats", "x", "out", "backbone", "c"):
             v = x.get(k, None)
             if isinstance(v, torch.Tensor):
@@ -46,7 +45,7 @@ def _as_tensor_feat(x):
             if isinstance(v, (list, tuple)) and len(v) and isinstance(v[0], torch.Tensor):
                 return v[0]
     if isinstance(x, (list, tuple)) and len(x):
-        # pick first tensor-like thing
+        # Pick the first tensor-like element available.
         for v in x:
             if isinstance(v, torch.Tensor):
                 return v
@@ -59,8 +58,8 @@ def _as_tensor_feat(x):
 class FullMatchAnythingTRTPlus(nn.Module):
     def __init__(
         self,
-        use_head: str = "gp",                     # 'gp' | 'decoder' | 'decoder_refine'
-        gp_beta: float = 1.0/0.07,               # keep parity with your original GP head
+        use_head: str = "gp",                     # Options: 'gp', 'decoder', or 'decoder_refine'.
+        gp_beta: float = 1.0/0.07,               # Keep parity with the original GP head.
         encoder_kwargs: Optional[Dict[str, Any]] = None,
         decoder_dim: int = 1024,
         decoder_depth: int = 4,
@@ -73,10 +72,10 @@ class FullMatchAnythingTRTPlus(nn.Module):
         self.use_head = use_head
         self.upsample_res = upsample_res
 
-        # ---- robust encoder construction (no assumption about arg names) ----
+        # Build the encoder without assuming a specific constructor signature.
         self.encoder = self._build_encoder(encoder_kwargs)
 
-        # ---- heads ----
+        # Configure the available heads.
         self.gp = GPMatchEncoderTRT(beta=gp_beta)
         self.decoder: Optional[MatchDecoderTRT] = None
         self.refiner: Optional[RefineCNNTRT] = None
@@ -91,19 +90,19 @@ class FullMatchAnythingTRTPlus(nn.Module):
     def _build_encoder(self, encoder_kwargs: Optional[Dict[str, Any]]) -> nn.Module:
         """Try several constructor shapes to match your local class signature."""
         kw = dict(encoder_kwargs or {})
-        # 1) try exactly what was provided
+        # Attempt the provided kwargs directly.
         try:
             return DINOv2EncoderTRT(**kw)
         except TypeError:
             pass
-        # 2) common pattern in your repo: (input_hw, amp)
+        # Fall back to the common (input_hw, amp) signature used elsewhere in the repo.
         try:
             ihw = kw.get("input_hw", (560, 560))
             amp = kw.get("amp", False)
             return DINOv2EncoderTRT(input_hw=ihw, amp=amp)
         except TypeError:
             pass
-        # 3) bare constructor (no kwargs)
+        # Finally, try the bare constructor without kwargs.
         try:
             return DINOv2EncoderTRT()
         except TypeError as e:
@@ -114,8 +113,8 @@ class FullMatchAnythingTRTPlus(nn.Module):
 
     @torch.no_grad()
     def forward(self, imgA: torch.Tensor, imgB: torch.Tensor):
-        # encode
-        encA, encB = self.encoder(imgA), self.encoder(imgB)  # may be dicts
+        # Encode both inputs.
+        encA, encB = self.encoder(imgA), self.encoder(imgB)  # The outputs may be dictionaries.
         fA = _as_tensor_feat(encA)
         fB = _as_tensor_feat(encB)
 

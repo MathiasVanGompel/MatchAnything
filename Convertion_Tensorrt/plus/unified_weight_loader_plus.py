@@ -1,5 +1,4 @@
-# unified_weight_loader_plus.py
-# Extends your existing unified loader so extra decoder/refiner weights can load.
+# Extension of the unified weight loader that supports decoder and refiner weights.
 
 from typing import Dict
 import re
@@ -11,8 +10,8 @@ except Exception:
     base_build = None
 
 _ROMA_TO_THIS = [
-    (re.compile(r"^matcher\.model\.decoder\."), "decoder."),         # decoder → MatchDecoderTRT
-    (re.compile(r"^matcher\.model\.encoder\.cnn\."), "refiner."),    # fine CNN → RefineCNNTRT
+    (re.compile(r"^matcher\.model\.decoder\."), "decoder."),         # Map decoder weights to MatchDecoderTRT.
+    (re.compile(r"^matcher\.model\.encoder\.cnn\."), "refiner."),    # Map fine CNN weights to RefineCNNTRT.
     (re.compile(r"^roma\.decoder\."), "decoder."),
     (re.compile(r"^roma\.refine\."), "refiner."),
 ]

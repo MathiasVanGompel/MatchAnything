@@ -1,24 +1,24 @@
-# Additional requirements for TensorRT conversion
+# Additional requirements for TensorRT conversion.
 
-# For downloading weights from Google Drive
+# For downloading weights from Google Drive.
 gdown>=4.6.0
 
-# Enhanced ONNX processing (if not already present)
+# Enhanced ONNX processing (if not already present).
 onnx>=1.12.0
 onnx-graphsurgeon>=0.3.12
 
-# TensorRT Python API (if not already present)
-# Note: This typically comes with TensorRT installation
+# TensorRT Python API (if not already present).
+# Note: This typically comes with TensorRT installation.
 # pycuda>=2022.1
 # tensorrt>=8.6.0
 
-# Enhanced image processing
+# Enhanced image processing.
 Pillow>=9.0.0
 opencv-python>=4.6.0
 
-# For better numerical operations
+# For better numerical operations.
 numpy>=1.21.0
 
-# PyTorch (if not already present)
+# PyTorch (if not already present).
 torch>=1.12.0
 torchvision>=0.13.0

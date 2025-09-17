@@ -1,4 +1,4 @@
-# Convertion_Tensorrt/unified_weight_loader.py
+# Unified weight loader used by the TensorRT conversion tooling.
 # -*- coding: utf-8 -*-
 """
 Unified loader that:
@@ -17,14 +17,14 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 
-# ---- mapping rules -----------------------------------------------------------
+# Mapping rules that bring checkpoint namespaces into alignment with the model.
 def create_comprehensive_mapping_rules() -> List[Tuple[re.Pattern, str]]:
     return [
-        # strip wrappers
+        # Strip wrapper prefixes added by various training entry points.
         (re.compile(r"^module\."), ""),
         (re.compile(r"^_orig_mod\."), ""),
 
-        # MatchAnything -> our encoder / matcher namespaces
+        # Map MatchAnything namespaces onto the TensorRT module layout.
         (re.compile(r"^matcher\.model\.decoder\.embedding_decoder\."), "encoder.dino."),
         (re.compile(r"^embedding_decoder\."), "encoder.dino."),
         (re.compile(r"^decoder\.embedding_decoder\."), "encoder.dino."),
@@ -38,22 +38,22 @@ def create_comprehensive_mapping_rules() -> List[Tuple[re.Pattern, str]]:
         (re.compile(r"^matcher\."), ""),
         (re.compile(r"^model\."), ""),
 
-        # fallback DINO namings
+        # Handle fallback DINO naming conventions from alternate checkpoints.
         (re.compile(r"^backbone\."), "encoder.dino."),
         (re.compile(r"^vit\."), "encoder.dino."),
         (re.compile(r"^dino\."), "encoder.dino."),
         (re.compile(r"^encoder\.vit\."), "encoder.dino."),
         (re.compile(r"^encoder\.backbone\."), "encoder.dino."),
 
-        # identities
+        # Preserve keys that already match the expected namespaces.
         (re.compile(r"^encoder\.dino\."), "encoder.dino."),
         (re.compile(r"^encoder\."), "encoder."),
     ]
 
 
-# ---- block-chunk canonicalization --------------------------------------------
+# Canonicalize DINOv2 block chunk naming between checkpoints and the model.
 def _model_uses_chunked_blocks(model_state: Dict[str, torch.Tensor]) -> bool:
-    # True if keys look like encoder.dino.blocks.0.0.norm1.weight
+    # Return True when keys look like encoder.dino.blocks.0.0.norm1.weight.
     for k in model_state.keys():
         if k.startswith("encoder.dino.blocks.0.0."):
             return True
@@ -80,17 +80,17 @@ def fix_dinov2_block_structure_for_model(mapped_ckpt: Dict[str, torch.Tensor],
             continue
 
         parts = key.split(".")
-        # Identify whether ckpt key is chunked or flat
+        # Identify whether the checkpoint key is chunked or flat.
         is_ckpt_chunked = (len(parts) > 4 and parts[3].isdigit() and parts[4].isdigit())
         is_ckpt_flat    = (len(parts) > 3 and parts[3].isdigit() and (len(parts) <= 4 or not parts[4].isdigit()))
 
         if wants_chunked and is_ckpt_flat:
-            # encoder.dino.blocks.N.xxx -> encoder.dino.blocks.0.N.xxx
+            # Convert encoder.dino.blocks.N.xxx to encoder.dino.blocks.0.N.xxx.
             new_parts = parts[:3] + ["0", parts[3]] + parts[4:]
             new_key = ".".join(new_parts)
             out[new_key] = val
         elif (not wants_chunked) and is_ckpt_chunked:
-            # encoder.dino.blocks.0.N.xxx -> encoder.dino.blocks.N.xxx
+            # Convert encoder.dino.blocks.0.N.xxx to encoder.dino.blocks.N.xxx.
             new_parts = parts[:3] + [parts[4]] + parts[5:]
             new_key = ".".join(new_parts)
             out[new_key] = val
@@ -99,7 +99,7 @@ def fix_dinov2_block_structure_for_model(mapped_ckpt: Dict[str, torch.Tensor],
     return out
 
 
-# ---- pos-embed resize (if needed) --------------------------------------------
+# Resize positional embeddings when the token count differs from the checkpoint.
 def resize_positional_embedding(pos_embed: torch.Tensor, target_len: int) -> torch.Tensor:
     """
     Resize DINOv2 positional embedding from pre-training resolution to target token length.
@@ -108,8 +108,8 @@ def resize_positional_embedding(pos_embed: torch.Tensor, target_len: int) -> tor
     if pos_embed.shape[1] == target_len:
         return pos_embed
 
-    cls_token = pos_embed[:, :1, :]                # [1,1,D]
-    spatial = pos_embed[:, 1:, :]                  # [1,N-1,D]
+    cls_token = pos_embed[:, :1, :]                # Shape [1, 1, D].
+    spatial = pos_embed[:, 1:, :]                  # Shape [1, N-1, D].
     n = spatial.shape[1]
     gs = int(np.sqrt(n))
     if gs * gs != n:
@@ -119,13 +119,13 @@ def resize_positional_embedding(pos_embed: torch.Tensor, target_len: int) -> tor
     if tgt_gs * tgt_gs != tgt_spatial:
         raise ValueError(f"Target length {target_len} not square+CLS.")
     D = spatial.shape[2]
-    grid = spatial.reshape(1, gs, gs, D).permute(0, 3, 1, 2)  # [1,D,gs,gs]
+    grid = spatial.reshape(1, gs, gs, D).permute(0, 3, 1, 2)  # Shape [1, D, gs, gs].
     grid = F.interpolate(grid, size=(tgt_gs, tgt_gs), mode="bilinear", align_corners=False)
     grid = grid.permute(0, 2, 3, 1).reshape(1, tgt_spatial, D)
     return torch.cat([cls_token, grid], dim=1)
 
 
-# ---- optional TIMM supplementation -------------------------------------------
+# Optionally supplement missing DINOv2 weights from TIMM when available.
 def _supplement_from_timm(model_state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     """
     Pull ANY missing DINOv2 weights from timm vit_large_patch14_dinov2.lvd142m
@@ -133,18 +133,18 @@ def _supplement_from_timm(model_state: Dict[str, torch.Tensor]) -> Dict[str, tor
     """
     out: Dict[str, torch.Tensor] = {}
     try:
-        import timm  # heavyweight import; keep inside try
+        import timm  # Heavyweight import; keep inside the try block.
         m = timm.create_model("vit_large_patch14_dinov2.lvd142m", pretrained=True)
         official = m.state_dict()
 
-        # Helper to copy if shapes match
+        # Helper to copy weights when shapes match.
         def try_copy(src_key: str, dst_key: str):
             if src_key in official and dst_key in model_state:
                 a, b = official[src_key], model_state[dst_key]
                 if tuple(a.shape) == tuple(b.shape):
                     out[dst_key] = a
 
-        # tokens / pos
+        # Tokens and positional embeddings.
         for s, d in [
             ("pos_embed", "encoder.dino.pos_embed"),
             ("cls_token", "encoder.dino.cls_token"),
@@ -154,12 +154,12 @@ def _supplement_from_timm(model_state: Dict[str, torch.Tensor]) -> Dict[str, tor
         ]:
             try_copy(s, d)
 
-        # patch_embed.*
+        # Patch embedding layers.
         for k in official.keys():
             if k.startswith("patch_embed."):
                 try_copy(k, f"encoder.dino.{k}")
 
-        # ALL blocks.* (attn, mlp, norms, layerscales)
+        # All transformer blocks, including attention, MLP, norms, and LayerScale parameters.
         for k in official.keys():
             if k.startswith("blocks."):
                 try_copy(k, f"encoder.dino.{k}")
@@ -169,7 +169,7 @@ def _supplement_from_timm(model_state: Dict[str, torch.Tensor]) -> Dict[str, tor
     return out
 
 
-# ---- main unified loader ------------------------------------------------------
+# Main unified loader that remaps, supplements, and filters checkpoint weights.
 def apply_unified_weight_loading(
     checkpoint_path: str,
     model_state_dict: Dict[str, torch.Tensor],
@@ -180,13 +180,13 @@ def apply_unified_weight_loading(
     and supplement with official DINOv2 weights from TIMM when helpful.
     """
     print(f"[UNIFIED] Loading checkpoint: {checkpoint_path}")
-    # 0) load raw ckpt
+    # Step 0: load the raw checkpoint file.
     try:
         raw = torch.load(checkpoint_path, map_location="cpu")
         ckpt_state_dict = raw.get("state_dict", raw)
     except Exception as e:
         print(f"[UNIFIED] Error torch.load: {e}")
-        # fallback attempts
+        # Try alternate loading strategies when torch.load fails.
         try:
             raw = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             ckpt_state_dict = raw.get("state_dict", raw)
@@ -205,7 +205,7 @@ def apply_unified_weight_loading(
     print(f"[UNIFIED] Checkpoint has {len(ckpt_state_dict)} keys")
     print(f"[UNIFIED] Model expects {len(model_state_dict)} keys")
 
-    # 1) map namespaces
+    # Step 1: map checkpoint namespaces into the model layout.
     rules = create_comprehensive_mapping_rules()
     mapped = {}
     for k, v in ckpt_state_dict.items():
@@ -214,15 +214,15 @@ def apply_unified_weight_loading(
             nk = pat.sub(rep, nk)
         mapped[nk] = v
 
-    # 2) adapt block structure to model (flat vs chunked)
+    # Step 2: adapt the block structure to match the model expectation (flat versus chunked).
     mapped = fix_dinov2_block_structure_for_model(mapped, model_state_dict)
 
-    # 3) supplement from TIMM if requested
+    # Step 3: supplement from TIMM when requested.
     if load_dinov2_components:
         print("[UNIFIED] Supplementing from TIMM (DINOv2 vit_large_patch14_dinov2.lvd142m) when shapes match...")
         mapped.update(_supplement_from_timm(model_state_dict))
 
-        # If pos_embed length differs, resize to target
+        # Resize positional embeddings when the length differs from the model expectation.
         if "encoder.dino.pos_embed" in mapped and "encoder.dino.pos_embed" in model_state_dict:
             pe = mapped["encoder.dino.pos_embed"]
             tgt_len = model_state_dict["encoder.dino.pos_embed"].shape[1]
@@ -233,7 +233,7 @@ def apply_unified_weight_loading(
                 except Exception as e:
                     print(f"[UNIFIED] pos_embed resize failed (continuing): {e}")
 
-    # 4) build loadable dict with shape checks
+    # Step 4: build the loadable dictionary with shape checks.
     loadable: Dict[str, torch.Tensor] = {}
     mismatches: List[Tuple[str, Tuple[int, ...], Tuple[int, ...]]] = []
     for mk, mt in model_state_dict.items():
@@ -242,7 +242,7 @@ def apply_unified_weight_loading(
         elif mk in mapped:
             mismatches.append((mk, tuple(mapped[mk].shape), tuple(mt.shape)))
 
-    # report
+    # Report overall loading statistics.
     total = len(model_state_dict); ok = len(loadable)
     dino_total = sum(1 for k in model_state_dict if k.startswith("encoder.dino."))
     dino_ok = sum(1 for k in loadable if k.startswith("encoder.dino."))
@@ -256,15 +256,15 @@ def apply_unified_weight_loading(
             print(f"  {k}: ckpt {a} vs model {b}")
 
     if ok >= 0.95 * total:
-        print("✅ SUCCESS: >95% of weights loaded.")
+        print("[UNIFIED] SUCCESS: >95% of weights loaded.")
     elif ok >= 0.80 * total:
-        print("⚠️  WARNING: 80–95% loaded; some parts may be random init.")
+        print("[UNIFIED] WARNING: 80–95% loaded; some parts may be randomly initialized.")
     else:
-        print("❌ ERROR: <80% loaded; major components missing.")
+        print("[UNIFIED] ERROR: <80% loaded; major components are missing.")
 
     return loadable
 
 
-# Back-compat wrapper
+# Backwards-compatibility wrapper.
 def remap_and_load(model, checkpoint_path: str, **kwargs) -> Dict[str, torch.Tensor]:
     return apply_unified_weight_loading(checkpoint_path, model.state_dict(), **kwargs)
