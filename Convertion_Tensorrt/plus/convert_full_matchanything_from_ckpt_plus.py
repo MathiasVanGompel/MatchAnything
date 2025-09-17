@@ -1,11 +1,11 @@
-# ONNX exporter mirroring your original CLI, with a --head flag,
-# and a PYTHONPATH bootstrap so RoMa's package resolves + SAME WEIGHT LOADER AS ORIGINAL.
+# ONNX exporter that mirrors the original CLI, adds a --head flag,
+# It also bootstraps PYTHONPATH so the RoMa package resolves with the same weight loader.
 
 import os, sys
 import argparse
 import torch
 
-# --- BEGIN: RoMa path bootstrap (fixes ImportError) ---
+# RoMa path bootstrap to avoid import errors.
 THIS = os.path.dirname(__file__)
 REPO = os.path.abspath(os.path.join(THIS, "..", ".."))
 ROMA_CANDIDATES = [
@@ -17,10 +17,10 @@ ROMA_CANDIDATES = [
 for p in ROMA_CANDIDATES:
     if os.path.isdir(p) and p not in sys.path:
         sys.path.insert(0, p)
-# --- END: RoMa path bootstrap ---
+# End of the RoMa path bootstrap adjustments.
 
 from full_matchanything_trt_plus import FullMatchAnythingTRTPlus
-# ✅ import the SAME loader as your original script
+# Import the same weight loader used by the original script.
 from unified_weight_loader import apply_unified_weight_loading
 
 def main():
@@ -32,7 +32,7 @@ def main():
     ap.add_argument("--precision", default="fp16", choices=["fp32", "fp16"])
     ap.add_argument("--opset", default=17, type=int)
     ap.add_argument("--head", default="gp", choices=["gp", "decoder", "decoder_refine"])
-    ap.add_argument("--beta", default=14.285714285714286, type=float)  # 1/0.07
+    ap.add_argument("--beta", default=14.285714285714286, type=float)  # Beta defaults to 1/0.07.
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
 
@@ -46,18 +46,18 @@ def main():
         upsample_res=(args.H, args.W)
     ).to(device).eval()
 
-    # --- Load weights like the original converter (encoder + gp fully mapped) ---
+    # Load weights just like the original converter (encoder and GP fully mapped).
     if os.path.isfile(args.ckpt):
         model_state = model.state_dict()
-        # Let your loader do all the mapping + TIMM supplementation
+        # Let the shared loader handle the mapping and TIMM supplementation.
         loadable = apply_unified_weight_loading(args.ckpt, model_state, load_dinov2_components=True)
-        # Keep only entries that exist in the model and match shapes
+        # Keep only entries that exist in the model and match shapes.
         filtered = {k: v for k, v in loadable.items()
                     if k in model_state and tuple(v.shape) == tuple(model_state[k].shape)}
         model_state.update(filtered)
         missing_keys = [k for k in model.state_dict().keys() if k not in filtered]
         model.load_state_dict(model_state, strict=False)
-        # Pretty print summary (like your original)
+        # Print a summary consistent with the original script.
         total = len(model.state_dict())
         print(f"[loader] loaded: {len(filtered)} / {total} tensors "
               f"({(len(filtered)/max(total,1))*100:.1f}%) | missing: {len(missing_keys)}")

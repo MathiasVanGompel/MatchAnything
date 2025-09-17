@@ -1,9 +1,9 @@
-# Convertion_Tensorrt/full/trt_engine.py
+# TensorRT engine wrapper shared by multiple scripts.
 from typing import Dict, List
 import numpy as np
 import tensorrt as trt
 import pycuda.driver as cuda
-import pycuda.autoinit  # creates a CUDA context
+import pycuda.autoinit  # Creates a CUDA context.
 
 def _np_dtype_for_trt(dt: trt.DataType):
     if dt == trt.DataType.FLOAT: return np.float32
@@ -20,7 +20,7 @@ class TRTEngine:
             self.engine = runtime.deserialize_cuda_engine(f.read())
         self.ctx = self.engine.create_execution_context()
 
-        # discover I/O tensors once
+        # Discover input and output tensors once.
         self.inputs: List[str] = []
         self.outputs: List[str] = []
         for i in range(self.engine.num_io_tensors):
@@ -34,7 +34,7 @@ class TRTEngine:
         print("  inputs :", self.inputs)
         print("  outputs:", self.outputs)
 
-    # <-- the tiny helper your runner expects
+    # Helper the downstream runner expects.
     def io_tensors(self):
         return self.inputs, self.outputs
 
@@ -45,7 +45,7 @@ class TRTEngine:
         h_out: Dict[str, np.ndarray] = {}
 
         try:
-            # Inputs: cast + contiguous + bind + HtoD
+            # Inputs: cast, make contiguous, bind, and copy host to device.
             for name, arr in feed.items():
                 exp_dt = _np_dtype_for_trt(self.engine.get_tensor_dtype(name))
                 arr = np.ascontiguousarray(arr, dtype=exp_dt)
@@ -55,7 +55,7 @@ class TRTEngine:
                 self.ctx.set_tensor_address(name, int(buf))
                 cuda.memcpy_htod_async(buf, arr, stream)
 
-            # Outputs: allocate with correct shapes/dtypes + bind
+            # Outputs: allocate with correct shapes and dtypes, then bind tensors.
             for name in self.outputs:
                 shp = tuple(self.ctx.get_tensor_shape(name))
                 dt  = _np_dtype_for_trt(self.engine.get_tensor_dtype(name))
@@ -65,17 +65,17 @@ class TRTEngine:
                 d_out[name] = dev
                 self.ctx.set_tensor_address(name, int(dev))
 
-            # Run (TensorRT v10 I/O API)
+            # Run the TensorRT v10 I/O API call.
             ok = self.ctx.execute_async_v3(stream.handle)
             if not ok:
                 raise RuntimeError("TensorRT execute_async_v3 failed.")
 
-            # D2H
+            # Copy device results back to host memory.
             for name in self.outputs:
                 cuda.memcpy_dtoh_async(h_out[name], d_out[name], stream)
             stream.synchronize()
             return h_out
 
         finally:
-            # Let PyCUDA free on GC.
+            # Allow PyCUDA to free allocations during garbage collection.
             pass

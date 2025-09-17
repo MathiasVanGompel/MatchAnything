@@ -1,4 +1,4 @@
-# Convertion_Tensorrt/encoders_trt_full.py
+# Encoder utilities tailored for the TensorRT conversion workflow.
 # -*- coding: utf-8 -*-
 import importlib
 from typing import Dict, Tuple, Optional
@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import os, sys
 
-# Make top-level package importable no matter where we run from
+# Ensure the top-level package resolves regardless of the working directory.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def _first_present_key(d: dict, keys) -> Optional[torch.Tensor]:
@@ -17,18 +17,18 @@ def _first_present_key(d: dict, keys) -> Optional[torch.Tensor]:
             return v
     return None
 
-# --- robust import helper -----------------------------------------------------
+# Robust import helper that locates the RoMa ViT implementation across layouts.
 def _import_vit_large():
     """
     Try several likely module paths for RoMa's DINOv2 vit_large builder.
     Works with your repo layout and common forks.
     """
     candidates = [
-        # submodule path (MatchAnything vendored RoMa)
+        # Submodule path for the vendorized RoMa copy.
         "imcui.third_party.MatchAnything.third_party.ROMA.roma.models.transformer.dinov2",
-        # some forks rename 'roma' -> 'romatch'
+        # Some forks rename "roma" to "romatch".
         "imcui.third_party.MatchAnything.third_party.ROMA.romatch.models.transformer.dinov2",
-        # direct vendor installs
+        # Direct vendor installs.
         "roma.models.transformer.dinov2",
         "romatch.models.transformer.dinov2",
     ]
@@ -41,14 +41,14 @@ def _import_vit_large():
     raise ImportError(f"Could not import RoMa vit_large; tried {candidates}") from last_err
 
 
-# --- DINOv2-L/14 builder (RoMa-compatible) ------------------------------------
+# Build a RoMa-compatible DINOv2 ViT-L/14 backbone.
 def build_dinov2_vitl14_romacfg(img_size: int = 518, block_chunks: int = 0) -> nn.Module:
     """
     Build the RoMa DINOv2 ViT-L/14 backbone.
     weights are injected by unified_weight_loader to keep memory low & names consistent.
     - img_size should be 518 for 37x37 patches + CLS = 1370 tokens in RoMa demos.
     - block_chunks controls whether blocks are grouped (affects key naming). We default to 0.
-      (Some RoMa/DINOv2 builds use chunking that yields keys like blocks.0.0.*)  # ref: issues show both variants
+      (Some RoMa/DINOv2 builds use chunking that yields keys like blocks.0.0.*)  # Reference: issues show both variants.
     """
     vit_large = _import_vit_large()
     model = vit_large(
@@ -56,7 +56,7 @@ def build_dinov2_vitl14_romacfg(img_size: int = 518, block_chunks: int = 0) -> n
         patch_size=14,
         init_values=1.0,
         ffn_layer="mlp",
-        block_chunks=block_chunks,  # 0 = flat (blocks.N.*). Chunked => (blocks.0.N.*)
+        block_chunks=block_chunks,  # A value of 0 keeps flat naming (blocks.N.*); chunking yields blocks.0.N.*.
     )
     model.eval()
     return model
@@ -85,13 +85,13 @@ class DINOv2EncoderTRT(nn.Module):
         self.input_hw = input_hw
         self.dino = build_dinov2_vitl14_romacfg(img_size=input_hw[0], block_chunks=block_chunks)
         if self.amp:
-            self.dino.half()  # align params/biases with FP16 inputs
+            self.dino.half()  # Align parameters and biases with FP16 inputs.
 
-        # cache for ONNX-friendly constants
+        # Cache the patch size for ONNX-friendly constant folding.
         self.patch = 14
 
     def _cast_input_to_encoder_dtype(self, x: torch.Tensor) -> torch.Tensor:
-        # Cast input to weight dtype (prevents Half/Float mismatch in Conv2d)
+        # Cast the input to match the encoder weights to avoid dtype mismatches in Conv2d.
         w = self.dino.patch_embed.proj.weight
         return x.to(dtype=w.dtype) if x.dtype != w.dtype else x
 
@@ -103,15 +103,15 @@ class DINOv2EncoderTRT(nn.Module):
         """
         B, C, H, W = x.shape
 
-        # grayscale → 3ch (trace-friendly)
+        # Promote grayscale inputs to three channels so tracing remains deterministic.
         if C == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # H,W must be multiples of patch size (14)
+        # Height and width must be multiples of the 14-pixel patch size.
         assert H % self.patch == 0 and W % self.patch == 0, "H and W must be multiples of 14."
         Hc, Wc = H // self.patch, W // self.patch
 
-        # enforce dtype to match encoder weights; avoid autocast in ONNX export
+        # Enforce the dtype to match encoder weights and avoid autocast during ONNX export.
         x = self._cast_input_to_encoder_dtype(x)
         out = self.dino.forward_features(x)
 
@@ -126,7 +126,7 @@ class DINOv2EncoderTRT(nn.Module):
         if isinstance(out, dict):
             seq = _first_present_key(out, preferred_keys)
         else:
-            seq = out  # some forks return the tensor directly
+            seq = out  # Some forks return the tensor directly.
 
         if seq is None:
             raise RuntimeError(
@@ -134,9 +134,9 @@ class DINOv2EncoderTRT(nn.Module):
                 f"Available keys: {list(out.keys()) if isinstance(out, dict) else type(out)}"
             )
 
-        # reshape to [B,C,Hc,Wc]
+        # Reshape to [B, C, Hc, Wc].
         if seq.dim() == 3:
-            # seq: [B, N, Ctok] (may include CLS → N == Hc*Wc + 1). Take the last Hc*Wc tokens.
+            # Sequence is [B, N, Ctok] and may include CLS so N equals Hc*Wc + 1; take the final Hc*Wc tokens.
             B_, N_, Ctok = seq.shape
             tokens = seq[:, -(Hc * Wc):, :]
             fmap = tokens.transpose(1, 2).contiguous().view(B_, Ctok, Hc, Wc)

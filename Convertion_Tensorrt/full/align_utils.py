@@ -16,7 +16,7 @@ import cv2, numpy as np
 from pathlib import Path
 import argparse
 
-# ---------- common helpers ----------
+# Common helper utilities.
 def _alpha_blend(a: np.ndarray, b: np.ndarray, alpha: float = 0.5) -> np.ndarray:
     alpha = float(np.clip(alpha, 0.0, 1.0))
     return (alpha * a + (1.0 - alpha) * b).clip(0, 255).astype(np.uint8)
@@ -28,12 +28,12 @@ def _checkerboard(a: np.ndarray, b: np.ndarray, tile: int = 32) -> np.ndarray:
     out[~mask] = b[~mask]
     return out
 
-# ---------- 1) Dense warp from model's warp field ----------
+# Dense warp derived from the model's coarse flow field.
 def dense_warp_align(
-    im0_resized: np.ndarray,    # RGB uint8 [H,W,3] at opt size
-    im1_resized: np.ndarray,    # RGB uint8 [H,W,3] at opt size
-    warp: np.ndarray,           # model output, shape [1,2,gh,gw] (float32/16)
-    cert: np.ndarray | None,    # model output, shape [1,1,gh,gw] or None
+    im0_resized: np.ndarray,    # RGB uint8 image shaped [H, W, 3] at the optimization size.
+    im1_resized: np.ndarray,    # RGB uint8 image shaped [H, W, 3] at the optimization size.
+    warp: np.ndarray,           # Model output shaped [1, 2, gh, gw] stored as float32 or float16.
+    cert: np.ndarray | None,    # Model output shaped [1, 1, gh, gw], or None when certainty is absent.
     use_cert_mask: bool = False,
     border: int = cv2.BORDER_REFLECT101,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -44,41 +44,41 @@ def dense_warp_align(
     H, W = im0_resized.shape[:2]
     warp = warp.astype(np.float32, copy=False)
 
-    # Up-sample warp to full-res and convert to absolute pixel coords.
-    # (Same math you used to build matches.)
+    # Upsample the warp to full resolution and convert to absolute pixel coordinates.
+    # This mirrors the math used when extracting sparse matches.
     gh, gw = warp.shape[2], warp.shape[3]
-    wx = cv2.resize(warp[0, 0], (W, H), interpolation=cv2.INTER_LINEAR)  # map in grid units
+    wx = cv2.resize(warp[0, 0], (W, H), interpolation=cv2.INTER_LINEAR)  # Map remains in grid units.
     wy = cv2.resize(warp[0, 1], (W, H), interpolation=cv2.INTER_LINEAR)
     patch_x = float(W) / float(gw)
     patch_y = float(H) / float(gh)
     map_x = (wx + 0.5) * patch_x
     map_y = (wy + 0.5) * patch_y
 
-    # Clamp to valid sampling range
+    # Clamp to the valid sampling range.
     map_x = np.clip(map_x, 0, W - 1).astype(np.float32)
     map_y = np.clip(map_y, 0, H - 1).astype(np.float32)
 
-    warped1 = cv2.remap(im1_resized, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=border)  # :contentReference[oaicite:2]{index=2}
+    warped1 = cv2.remap(im1_resized, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=border)  # Apply the dense warp with OpenCV remap.
 
     if use_cert_mask and cert is not None:
         c = cv2.resize(cert.astype(np.float32)[0, 0], (W, H), interpolation=cv2.INTER_LINEAR)
-        c = np.clip(c, 0.0, 1.0)[..., None]  # soft alpha
+        c = np.clip(c, 0.0, 1.0)[..., None]  # Treat certainty as a soft alpha map.
         blended = (c * im0_resized + (1.0 - c) * warped1).astype(np.uint8)
     else:
         blended = _alpha_blend(im0_resized, warped1, alpha=0.5)
 
     return warped1, blended
 
-# ---------- 2) Homography warp from sparse matches ----------
+# Homography-based warp computed from sparse matches.
 def homography_warp_align(
-    im0: np.ndarray,            # RGB uint8 [H0,W0,3] (original size OK)
-    im1: np.ndarray,            # RGB uint8 [H1,W1,3]
-    kpts0: np.ndarray,          # [N,2] (x,y) in im0
-    kpts1: np.ndarray,          # [N,2] (x,y) in im1
+    im0: np.ndarray,            # RGB uint8 image shaped [H0, W0, 3] at the original size.
+    im1: np.ndarray,            # RGB uint8 image shaped [H1, W1, 3] at the original size.
+    kpts0: np.ndarray,          # Array of [N, 2] (x, y) keypoints in im0.
+    kpts1: np.ndarray,          # Array of [N, 2] (x, y) keypoints in im1.
     ransac_thresh: float = 2.0,
     confidence: float = 0.999,
     maxIters: int = 5000,
-    overlay: str = "alpha",     # "alpha" or "checker"
+    overlay: str = "alpha",     # Options: "alpha" or "checker".
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Estimate H (im1->im0) with RANSAC and warp image1 to image0.
@@ -89,12 +89,12 @@ def homography_warp_align(
 
     H, mask = cv2.findHomography(kpts1, kpts0, cv2.RANSAC,
                                  ransacReprojThreshold=ransac_thresh,
-                                 maxIters=maxIters, confidence=confidence)  # :contentReference[oaicite:3]{index=3}
+                                 maxIters=maxIters, confidence=confidence)  # Estimate the homography with OpenCV RANSAC.
     if H is None:
         raise RuntimeError("cv2.findHomography failed.")
 
     H0, W0 = im0.shape[:2]
-    warped1 = cv2.warpPerspective(im1, H, (W0, H0), flags=cv2.INTER_LINEAR)  # :contentReference[oaicite:4]{index=4}
+    warped1 = cv2.warpPerspective(im1, H, (W0, H0), flags=cv2.INTER_LINEAR)  # Warp image1 into image0's frame with OpenCV.
 
     if overlay == "checker":
         ov = _checkerboard(cv2.cvtColor(im0, cv2.COLOR_RGB2BGR),
@@ -107,7 +107,7 @@ def homography_warp_align(
     inliers = mask.ravel().astype(bool)
     return warped1, ov, inliers
 
-# ---------- tiny CLI for quick tests ----------
+# Small CLI for quick local experiments.
 def _load_rgb(p): 
     bgr = cv2.imread(p, cv2.IMREAD_COLOR)
     if bgr is None: raise FileNotFoundError(p)
