@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""TensorRT 10.x runtime driver for the grayscale E-LoFTR head."""
+
 import argparse
 import os
 import sys
-import numpy as np
+from typing import Optional
+
 import cv2
+import numpy as np
 import tensorrt as trt
 
-# Use PyCUDA because you already have it installed
-import pycuda.driver as cuda
+# Use PyCUDA because it ships with the MatchAnything tooling environment.
 import pycuda.autoinit  # noqa: F401
+import pycuda.driver as cuda
 
 TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
-# ---------- Helpers ----------
+# ---------------------------------------------------------------------------
+# TensorRT-specific helpers
+# ---------------------------------------------------------------------------
 class OutputAllocator(trt.IOutputAllocator):
-    """
-    One allocator instance can handle multiple outputs.
-    TensorRT calls:
-      - notify_shape(name, shape): tells you the final resolved shape
-      - reallocate_output(name, memory, size, alignment): asks you to return
-        a device pointer with at least 'size' bytes.
-    """
+    """Simple TensorRT output allocator."""
+
+    # One allocator instance can handle multiple outputs. TensorRT calls:
+    #   - notify_shape(name, shape): tells you the final resolved shape.
+    #   - reallocate_output(name, memory, size, alignment): asks you to return
+    #     a device pointer with at least ``size`` bytes.
     def __init__(self):
         super().__init__()
         self.device_buffers = {}  # name -> pycuda.driver.DeviceAllocation
@@ -46,7 +52,7 @@ class OutputAllocator(trt.IOutputAllocator):
         return self.reallocate_output(tensor_name, memory, size, alignment)
 
 def np_from_trt_dtype(dt: trt.DataType) -> np.dtype:
-    """Map TensorRT dtype to numpy dtype."""
+    """Map a TensorRT dtype to the corresponding ``numpy`` dtype."""
     return np.dtype(trt.nptype(dt))
 
 def vol(shape):
@@ -55,7 +61,7 @@ def vol(shape):
         v *= int(s)
     return v
 
-def preprocess_gray(path, H, W):
+def preprocess_gray(path: Optional[str], H: int, W: int) -> np.ndarray:
     if path is None:
         img = np.zeros((H, W), dtype=np.uint8)
     else:
@@ -86,7 +92,7 @@ def draw_matches_gray(imgL, imgR, mkpts0, mkpts1, mconf, out_path):
             cv2.line(canvas, p0, p1, color, 1)
     cv2.imwrite(out_path, canvas)
 
-def load_engine(engine_path):
+def load_engine(engine_path: str):
     with open(engine_path, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
         engine = runtime.deserialize_cuda_engine(f.read())
     if engine is None:
@@ -94,6 +100,8 @@ def load_engine(engine_path):
     return engine
 
 def print_io(engine):
+    """Print the TensorRT engine bindings and tensors."""
+
     # TensorRT v10+ tensor-centric API
     if hasattr(engine, "num_io_tensors"):
         n = engine.num_io_tensors
@@ -117,12 +125,10 @@ def print_io(engine):
             print(f"[{i}] {name:15s}  {kind:6s}  {dtype}  shape={tuple(shape)}")
 
 def pick_io_names(engine):
-    """
-    Try to infer IO tensor names:
-    - Prefer standard names: image0, image1, mkpts0, mkpts1, mconf
-    - Otherwise, choose by roles (INPUT/OUTPUT) and simple shape heuristics.
-    Returns dict with keys: 'image0','image1','mkpts0','mkpts1','mconf'
-    """
+    """Infer canonical I/O tensor names to match the exporter convention."""
+
+    # Prefer standard names: image0, image1, mkpts0, mkpts1, mconf. Otherwise
+    # choose by roles (INPUT/OUTPUT) and simple shape heuristics.
     names = {"image0": None, "image1": None, "mkpts0": None, "mkpts1": None, "mconf": None}
     if hasattr(engine, "num_io_tensors"):
         # v10+
@@ -165,8 +171,11 @@ def pick_io_names(engine):
             names[k] = nm
     return names
 
-# ---------- Main ----------
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 def main():
+    """Entry point for running inference with the TensorRT engine."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", required=True)
     ap.add_argument("--left", default=None, help="Left image (grayscale ok)")
