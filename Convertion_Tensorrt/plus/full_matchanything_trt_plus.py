@@ -4,10 +4,11 @@ from typing import Optional, Tuple, Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Import the existing encoder and GP head.
 try:
-    from encoders_trt_full import DINOv2EncoderTRT
+    from full.encoders_trt_full import DINOv2EncoderTRT
 except Exception as e:
     raise ImportError(
         "DINOv2EncoderTRT not found. Keep this file next to your existing "
@@ -15,7 +16,7 @@ except Exception as e:
     )
 
 try:
-    from gp_trt import GPMatchEncoderTRT  # Existing GP head reused here.
+    from full.gp_trt import GPMatchEncoderTRT  # Existing GP head reused here.
 except Exception as e:
     raise ImportError(
         "GPMatchEncoderTRT not found. Keep this file next to your existing code. "
