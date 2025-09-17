@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import argparse, os, sys, torch
 
-# --- BEGIN: RoMa path bootstrap ---
+# RoMa path bootstrap ensures the vendorized RoMa package resolves correctly.
 THIS = os.path.dirname(__file__)
 REPO = os.path.abspath(os.path.join(THIS, "..", ".."))
 ROMA_CANDIDATES = [
@@ -14,7 +14,7 @@ ROMA_CANDIDATES = [
 for p in ROMA_CANDIDATES:
     if os.path.isdir(p) and p not in sys.path:
         sys.path.insert(0, p)
-# --- END: RoMa path bootstrap ---
+# End of the RoMa path bootstrap adjustments.
 
 from typing import Dict
 from full_matchanything_trt import FullMatchAnythingTRT
@@ -29,7 +29,7 @@ def parse_args():
     ap.add_argument("--H", type=int, default=518)
     ap.add_argument("--W", type=int, default=518)
     ap.add_argument("--opset", type=int, default=17)
-    ap.add_argument("--beta", type=float, default=14.285714285714286)  # 1/0.07
+    ap.add_argument("--beta", type=float, default=14.285714285714286)  # Beta defaults to 1/0.07.
     return ap.parse_args()
 
 def _filter_to_model_keys(loadable: Dict[str, torch.Tensor], model_state: Dict[str, torch.Tensor]):

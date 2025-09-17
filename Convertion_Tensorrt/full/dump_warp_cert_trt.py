@@ -5,7 +5,7 @@ from pathlib import Path
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], np.float32)
 
-# ---- TRT 10.x, name-based IO ----
+# TensorRT 10.x helper that binds tensors by name.
 class TRTEngine:
     def __init__(self, plan_path):
         import tensorrt as trt, pycuda.driver as cuda, pycuda.autoinit  # noqa
@@ -35,27 +35,27 @@ class TRTEngine:
 
     def infer(self, feeds: dict):
         trt, cuda = self.trt, self.cuda
-        # set shapes
+        # Set input shapes on the execution context.
         for n in self.io_names:
             if self.is_input[n] and n in feeds:
                 arr = np.asarray(feeds[n])
                 self.context.set_input_shape(n, tuple(arr.shape))
-        # alloc + bind
+        # Allocate device buffers and bind tensor addresses.
         for n in self.io_names:
             shp = tuple(self.context.get_tensor_shape(n))
             dt  = self.engine.get_tensor_dtype(n)
             self._ensure_alloc(n, shp, dt)
             self.context.set_tensor_address(n, int(self.device_buffers[n]))
-        # copy H2D (cast to expected dtype)
+        # Copy host inputs to device memory, casting to the expected dtype.
         for n, arr in feeds.items():
             exp = self.engine.get_tensor_dtype(n)
             npdt = np.dtype(trt.nptype(exp))
             if arr.dtype != npdt: arr = arr.astype(npdt, copy=False)
             arr = np.ascontiguousarray(arr)
             cuda.memcpy_htod_async(self.device_buffers[n], arr, self.stream)
-        # run
+        # Execute the TensorRT engine.
         self.context.execute_async_v3(stream_handle=self.stream.handle)
-        # copy D2H
+        # Copy device outputs back to host memory.
         outs = {}
         for n in self.io_names:
             if not self.is_input[n]:
@@ -63,7 +63,7 @@ class TRTEngine:
                 self.cuda.memcpy_dtoh_async(host, self.device_buffers[n], self.stream)
                 outs[n] = host
         self.stream.synchronize()
-        # make cv2-friendly
+        # Cast outputs for OpenCV compatibility.
         for k in outs:
             if outs[k].dtype == np.float16:
                 outs[k] = outs[k].astype(np.float32)
@@ -78,8 +78,8 @@ def _pre(img, size):
     img = cv2.resize(img, (size, size), interpolation=cv2.INTER_LINEAR)
     x = img.astype(np.float32)/255.0
     x = (x - IMAGENET_MEAN) / IMAGENET_STD
-    x = np.transpose(x, (2,0,1))[None, ...]  # NCHW
-    return np.ascontiguousarray(x, np.float32), img  # return also the resized uint8 for reference
+    x = np.transpose(x, (2,0,1))[None, ...]  # Arrange as NCHW.
+    return np.ascontiguousarray(x, np.float32), img  # Also return the resized uint8 image for reference.
 
 def main():
     ap = argparse.ArgumentParser()
@@ -99,12 +99,12 @@ def main():
     x1, _ = _pre(im1, args.opt)
 
     outs = net.infer({"image0": x0, "image1": x1})
-    # Expect keys: 'warp' (1×2×gh×gw), 'cert' (1×1×gh×gw)
+    # Expect keys 'warp' (1×2×gh×gw) and 'cert' (1×1×gh×gw).
     base = f"{Path(args.image0).stem}__{Path(args.image1).stem}"
     np.savez_compressed(Path(args.outdir)/f"warp_cert_{base}.npz",
                         warp=outs["warp"], cert=outs["cert"])
     print(f"[OK] wrote warp+cert to {Path(args.outdir)/f'warp_cert_{base}.npz'}")
-    # sanity
+    # Sanity check.
     print("warp:", outs["warp"].shape, outs["warp"].dtype,
           "| cert:", outs["cert"].shape, outs["cert"].dtype)
 

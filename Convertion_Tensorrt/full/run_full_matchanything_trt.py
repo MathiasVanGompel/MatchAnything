@@ -6,7 +6,7 @@ from pathlib import Path
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
-# ---------------- TensorRT 10.x runtime wrapper (name-based IO) ---------------
+# TensorRT 10.x runtime wrapper that relies on name-based tensor I/O.
 class TRTEngine:
     def __init__(self, plan_path):
         import tensorrt as trt, pycuda.driver as cuda, pycuda.autoinit  # noqa
@@ -38,20 +38,20 @@ class TRTEngine:
     def infer(self, feeds: dict):
         trt, cuda = self.trt, self.cuda
 
-        # Set input shapes from feeds
+        # Set input shapes from the provided feeds.
         for name in self.io_names:
             if self.is_input[name] and name in feeds:
                 arr = np.asarray(feeds[name])
                 self.context.set_input_shape(name, tuple(arr.shape))
 
-        # Allocate and bind
+        # Allocate buffers and bind them to the execution context.
         for name in self.io_names:
             shape = tuple(self.context.get_tensor_shape(name))
             dtype = self.engine.get_tensor_dtype(name)
             self._ensure_alloc(name, shape, dtype)
             self.context.set_tensor_address(name, int(self.device_buffers[name]))
 
-        # H2D (cast feeds to engine dtype to avoid FP32/FP16 size mismatch)
+        # Copy host tensors to device memory after matching the engine dtype.
         for name, arr in feeds.items():
             exp_dtype = self.engine.get_tensor_dtype(name)
             np_dtype = np.dtype(trt.nptype(exp_dtype))
@@ -63,10 +63,10 @@ class TRTEngine:
                                    f"(engine expects dtype {np_dtype}).")
             cuda.memcpy_htod_async(self.device_buffers[name], arr, self.stream)
 
-        # Run
+        # Execute the TensorRT engine.
         self.context.execute_async_v3(stream_handle=self.stream.handle)
 
-        # D2H
+        # Copy device outputs back to host memory.
         outs = {}
         for name in self.io_names:
             if not self.is_input[name]:
@@ -75,13 +75,13 @@ class TRTEngine:
                 outs[name] = host
         self.stream.synchronize()
 
-        # Cast to fp32 for OpenCV
+        # Cast to float32 so OpenCV can consume the outputs without additional conversions.
         for k in outs:
             if outs[k].dtype == np.float16:
                 outs[k] = outs[k].astype(np.float32)
         return outs
 
-# ----------------------------- Pre/post utils ---------------------------------
+# Pre- and post-processing utilities.
 def load_rgb(path: str) -> np.ndarray:
     im = cv2.imread(path, cv2.IMREAD_COLOR)
     if im is None: raise FileNotFoundError(path)
@@ -96,7 +96,7 @@ def preprocess_pair(path0: str, path1: str, size: int):
         x = img.astype(np.float32)/255.0
         x = (x - IMAGENET_MEAN) / IMAGENET_STD
         x = np.transpose(x, (2,0,1))[None, ...]
-        return np.ascontiguousarray(x, dtype=np.float32)  # TRT wrapper will cast if needed
+        return np.ascontiguousarray(x, dtype=np.float32)  # The TensorRT wrapper will cast if needed.
     return (to_chw(im0r), to_chw(im1r)), (im0, im1), (H0, W0, H1, W1)
 
 def upsample_warp_cert(warp, cert, H, W):
@@ -157,7 +157,7 @@ def draw_matches(im0, im1, p0, p1, mode="lines", line_thickness=3, dot_radius=4,
     canvas[margin:margin+H0, margin:margin+W0] = cv2.cvtColor(im0, cv2.COLOR_RGB2BGR)
     canvas[margin:margin+H1, 2*margin+W0:2*margin+W0+W1] = cv2.cvtColor(im1, cv2.COLOR_RGB2BGR)
     p1s = p1 + np.array([W0+margin, 0], np.float32)[None,:]
-    # draw
+    # Draw each match on the concatenated canvas.
     color = (0,255,0)
     if mode == "dots":
         for a, b in zip(p0, p1s):
@@ -174,7 +174,7 @@ def draw_matches(im0, im1, p0, p1, mode="lines", line_thickness=3, dot_radius=4,
             cv2.line(canvas, a, b, color, line_thickness, cv2.LINE_AA)
     return canvas
 
-# ---------------------------------- main --------------------------------------
+# Entry point for running inference with the TensorRT engine.
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", required=True)
@@ -212,7 +212,7 @@ def main():
         p0_opt, p1_opt, s01 = mutual_filter((p0_opt, p1_opt, s01), (p1b_opt, p0b_opt, s10), tol=4.0)
         print(f"[LOG] mutual-filtered matches: {len(p0_opt)}")
 
-    # rescale to original
+    # Rescale matches back to the original image resolution.
     pts0 = p0_opt * np.array([W0/args.opt, H0/args.opt], np.float32)[None,:]
     pts1 = p1_opt * np.array([W1/args.opt, H1/args.opt], np.float32)[None,:]
 
@@ -226,7 +226,7 @@ def main():
         np.savez_compressed(Path(args.outdir)/f"matches_ransac_{base}.npz", kpts0=in0, kpts1=in1, inliers=inl)
         vis_pairs = (in0, in1)
 
-    # warn if empty and dump certainty stats
+    # Warn when no matches survive and report certainty statistics.
     if len(vis_pairs[0]) == 0:
         print("[WARN] No matches to draw. Try lowering --conf (e.g., 0.2).")
 

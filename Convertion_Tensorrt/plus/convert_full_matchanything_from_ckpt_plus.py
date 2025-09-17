@@ -1,6 +1,5 @@
-# ONNX exporter mirroring original, with a --head flag,
-# PYTHONPATH bootstrap for RoMa, SAME unified loader as original,
-# and optional extra decoder/refiner remap via ckpt_tools_plus.
+# ONNX exporter that mirrors the original CLI, adds a --head flag,
+# It also bootstraps PYTHONPATH so the RoMa package resolves with the same weight loader.
 
 import os, sys
 import argparse
@@ -18,7 +17,7 @@ ROMA_CANDIDATES = [
 for p in ROMA_CANDIDATES:
     if os.path.isdir(p) and p not in sys.path:
         sys.path.insert(0, p)
-# --- END: RoMa path bootstrap ---
+# End of the RoMa path bootstrap adjustments.
 
 from full_matchanything_trt_plus import FullMatchAnythingTRTPlus
 # same unified loader as your original converter
@@ -30,7 +29,7 @@ try:
     from ckpt_tools_plus import try_load_extra_heads
 except Exception:  # fallback if someone runs from repo root
     try:
-        from Convertion_Tensorrt.full.ckpt_tools_plus import try_load_extra_heads
+        from ckpt_tools_plus import try_load_extra_heads
     except Exception as e:
         print(f"[loader+heads] optional ckpt_tools_plus not available: {e}")
         try_load_extra_heads = None
@@ -44,7 +43,7 @@ def main():
     ap.add_argument("--precision", default="fp16", choices=["fp32", "fp16"])
     ap.add_argument("--opset", default=17, type=int)
     ap.add_argument("--head", default="gp", choices=["gp", "decoder", "decoder_refine"])
-    ap.add_argument("--beta", default=14.285714285714286, type=float)  # 1/0.07
+    ap.add_argument("--beta", default=14.285714285714286, type=float)  # Beta defaults to 1/0.07.
     ap.add_argument("--device", default="cuda")
     # optional: a second ckpt to mine decoder/refiner weights from (e.g., official RoMa)
     ap.add_argument("--extra_ckpt", type=str, default=None)
@@ -60,16 +59,12 @@ def main():
         upsample_res=(args.H, args.W)
     ).to(device).eval()
 
-    # --- Load weights like the original (skip when head='gp' to keep your good path unchanged) ---
-    if args.head == "gp":
-        print("[info] head='gp': skipping external ckpt load (not needed).")
-    elif os.path.isfile(args.ckpt):
+    # Load weights just like the original converter (encoder and GP fully mapped).
+    if os.path.isfile(args.ckpt):
         model_state = model.state_dict()
-
-        # 1) unified loader (your original mapping + TIMM DINOv2 supplementation)
+        # Let the shared loader handle the mapping and TIMM supplementation.
         loadable = apply_unified_weight_loading(args.ckpt, model_state, load_dinov2_components=True)
-
-        # keep only keys present in model with matching shapes
+        # Keep only entries that exist in the model and match shapes.
         filtered = {k: v for k, v in loadable.items()
                     if k in model_state and tuple(v.shape) == tuple(model_state[k].shape)}
         model_state.update(filtered)

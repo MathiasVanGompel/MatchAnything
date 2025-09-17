@@ -1,12 +1,12 @@
-# Convertion_Tensorrt/full/viz_style.py
+# Visualization helpers mirroring the Hugging Face styling.
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import ConnectionPatch  # docs: https://matplotlib.org/stable/api/patches_api.html#matplotlib.patches.ConnectionPatch
+from matplotlib.patches import ConnectionPatch  # Documentation: https://matplotlib.org/stable/api/patches_api.html#matplotlib.patches.ConnectionPatch
 
-# green like the HF Space (RGB for mpl, BGR for cv2)
-CV2_GREEN = (0, 180, 100)                     # BGR
-MPL_GREEN = (0/255, 180/255, 100/255)         # RGB
+# Match the green palette used on the Hugging Face Space (RGB for Matplotlib, BGR for OpenCV).
+CV2_GREEN = (0, 180, 100)                     # BGR ordering for OpenCV.
+MPL_GREEN = (0/255, 180/255, 100/255)         # RGB ordering for Matplotlib.
 
 def draw_matches_cv2_green(im0, im1, kpts0, kpts1, line_thickness=2, dot_radius=3, margin=16):
     """Concatenate images and draw thin anti-aliased green lines + small dots (RGB in, RGB out)."""

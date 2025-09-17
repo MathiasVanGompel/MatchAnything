@@ -24,7 +24,7 @@ class FullMatchAnythingTRT(nn.Module):
 
     @torch.no_grad()
     def forward(self, image0: torch.Tensor, image1: torch.Tensor):
-        f0 = self.encoder(image0)["coarse"]  # [B,1024,Hc,Wc]
+        f0 = self.encoder(image0)["coarse"]  # Coarse features have shape [B, 1024, Hc, Wc].
         f1 = self.encoder(image1)["coarse"]
         warp_c, cert_c = self.matcher(f0, f1)
         return warp_c, cert_c

@@ -1,19 +1,18 @@
-# decoder_refine_trt.py
-# TRT-friendly RoMa-style match decoder + optional fine refinement CNN
+# TensorRT-friendly RoMa-style match decoder with an optional refinement CNN.
 
 from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ---------- helpers ----------
+# Helper layers that maintain TensorRT-friendly behavior.
 class FP32Softmax(nn.Module):
     """Always computes softmax in float32 and RETURNS float32."""
     def __init__(self, dim: int):
         super().__init__()
         self.dim = dim
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.softmax(x.float(), dim=self.dim)  # keep fp32
+        return F.softmax(x.float(), dim=self.dim)  # Keep computations in float32.
 
 class PreNorm(nn.Module):
     def __init__(self, dim: int, fn: nn.Module):
@@ -46,29 +45,29 @@ class CrossAttention(nn.Module):
         self.softmax = FP32Softmax(dim=-1)
 
     def forward(self, qx: torch.Tensor, kx: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # qx: [B, Na, C], kx: [B, Nb, C]
+        # The tensor qx has shape [B, Na, C] and kx has shape [B, Nb, C].
         B, Na, _ = qx.shape
         Nb = kx.shape[1]
         q = self.to_q(qx)
         k = self.to_k(kx)
         v = self.to_v(kx)
         H = self.heads
-        q = q.view(B, Na, H, -1).transpose(1, 2)   # [B,H,Na,hd]
-        k = k.view(B, Nb, H, -1).transpose(1, 2)   # [B,H,Nb,hd]
-        v = v.view(B, Nb, H, -1).transpose(1, 2)   # [B,H,Nb,hd]
-        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,H,Na,Nb]
-        attn = self.softmax(attn)                                  # **fp32**
+        q = q.view(B, Na, H, -1).transpose(1, 2)   # Shape [B, H, Na, hd].
+        k = k.view(B, Nb, H, -1).transpose(1, 2)   # Shape [B, H, Nb, hd].
+        v = v.view(B, Nb, H, -1).transpose(1, 2)   # Shape [B, H, Nb, hd].
+        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # Shape [B, H, Na, Nb].
+        attn = self.softmax(attn)                                  # Keeps the attention logits in float32.
 
-        # compute output in fp32 for stability
-        out = torch.matmul(attn, v.float())                        # -> [B,H,Na,hd] (fp32)
-        out = out.transpose(1, 2).contiguous().view(B, Na, -1)     # [B,Na,H*hd] (fp32)
+        # Compute the output in float32 for numerical stability.
+        out = torch.matmul(attn, v.float())                        # Produces [B, H, Na, hd] in float32.
+        out = out.transpose(1, 2).contiguous().view(B, Na, -1)     # Reshape to [B, Na, H*hd] in float32.
 
-        # IMPORTANT: match Linear weight dtype to avoid Float/Half mismatch
+        # Important: match the Linear weight dtype to avoid Float/Half mismatches.
         w_dtype = self.to_out.weight.dtype
         if out.dtype != w_dtype:
             out = out.to(w_dtype)
 
-        return self.to_out(out), attn  # attn stays fp32
+        return self.to_out(out), attn  # Keep the attention tensor in float32.
 
 class DecoderLayer(nn.Module):
     def __init__(self, dim: int, heads: int = 8, head_dim: int = 64, ff_mult: int = 4):
@@ -95,27 +94,27 @@ class MatchDecoderTRT(nn.Module):
         for blk in self.layers:
             A, _ = blk(A, B)
         C = A.shape[-1]
-        logits = (A @ B.transpose(1, 2)) / (C ** 0.5)  # [B,Na,Nb]
+        logits = (A @ B.transpose(1, 2)) / (C ** 0.5)  # Shape [B, Na, Nb].
         return logits
 
     @torch.no_grad()
     def forward(self, fA: torch.Tensor, fB: torch.Tensor, Ha: int, Wa: int, Hb: int, Wb: int):
-        # fA/fB: [B,C,Ha,Wa] / [B,C,Hb,Wb]
+        # The tensor fA has shape [B, C, Ha, Wa] and fB has shape [B, C, Hb, Wb].
         B = fA.shape[0]
-        A = fA.flatten(2).transpose(1, 2).contiguous()    # [B,Na,C]
-        Btok = fB.flatten(2).transpose(1, 2).contiguous() # [B,Nb,C]
+        A = fA.flatten(2).transpose(1, 2).contiguous()    # Tokens shaped [B, Na, C].
+        Btok = fB.flatten(2).transpose(1, 2).contiguous() # Tokens shaped [B, Nb, C].
         logits = self.forward_logits(A, Btok)
-        attn = self.softmax(logits)                       # **fp32**
+        attn = self.softmax(logits)                       # Keep attention probabilities in float32.
 
-        # coords in **fp32**
+        # Build coordinates in float32.
         ys = torch.arange(Hb, device=fA.device, dtype=torch.float32).view(Hb, 1).repeat(1, Wb)
         xs = torch.arange(Wb, device=fA.device, dtype=torch.float32).view(1, Wb).repeat(Hb, 1)
-        coords = torch.stack([xs.reshape(-1), ys.reshape(-1)], dim=1).unsqueeze(0)  # [1,Nb,2]
-        tgt = attn @ coords                              # [B,Na,2]  (fp32)
+        coords = torch.stack([xs.reshape(-1), ys.reshape(-1)], dim=1).unsqueeze(0)  # Shape [1, Nb, 2].
+        tgt = attn @ coords                              # Produces [B, Na, 2] in float32.
 
         warp = tgt.view(B, Ha * Wa, 2).transpose(1, 2).view(B, 2, Ha, Wa)
         cert = attn.max(dim=2)[0].view(B, 1, Ha, Wa)
-        # cast OUTS back to encoder dtype (fp16 when AMP)
+        # Cast outputs back to the encoder dtype (FP16 when AMP is enabled).
         return warp.to(fA.dtype), cert.to(fA.dtype)
 
 class RefineCNNTRT(nn.Module):
@@ -128,7 +127,7 @@ class RefineCNNTRT(nn.Module):
         self.iters = iters
         self.conv1 = nn.Conv2d(in_ch, hidden, 3, padding=1)
         self.conv2 = nn.Conv2d(hidden, hidden, 3, padding=1)
-        self.conv3 = nn.Conv2d(hidden, 3, 3, padding=1)  # 2 for delta, 1 for cert delta
+        self.conv3 = nn.Conv2d(hidden, 3, 3, padding=1)  # Two channels for flow deltas and one for certainty delta.
         self.act = nn.GELU()
         self.sig = nn.Sigmoid()
 
